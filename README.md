@@ -14,7 +14,7 @@ UAV-ira/
       - vision/       # ArUco marker detection
       - landing/      # April tag detection and Pixhawk flight commands
       - slam/         # Visual odometry, tracks where the drone is
-      - comms/       # UGV communication
+      - comms/        # UGV communication
       - tests/        # Hardware and flight test scripts
 ```
 
