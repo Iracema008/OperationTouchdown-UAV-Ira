@@ -21,7 +21,7 @@ def camera_broadcaster(lock):
             cam_rgb = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_A)
             cam_left = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_B)
             cam_right = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_C)
-            
+
             stereo = pipeline.create(dai.node.StereoDepth)
             sync = pipeline.create(dai.node.Sync)
 
