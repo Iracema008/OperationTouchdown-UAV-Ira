@@ -586,7 +586,6 @@ def main():
                 stereo.depth.link(sync.inputs["depth"])
 
                 
-
                 # Calibration
                 calib = device.getCalibration()
                 K = np.array(calib.getCameraIntrinsics(LEFT_SOCKET, W, H), dtype=np.float64)

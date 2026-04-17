@@ -51,6 +51,7 @@ class PixhawkConfig:
     hover_altitude_m: float = 3.0
     land_speed_ms:    float = 0.3             # descent speed m/s
     alignment_threshold_m: float = 0.15      # how close to tag center before descending
+    landing_threshold: float = 1.5
 
 
 @dataclass

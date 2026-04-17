@@ -22,10 +22,6 @@ Kp_z  = 0.3
 # Safety limit on velocity commands (adjust as we test)
 MAX_VELOCITY = 0.3
 
-# 5 cm threshold for disarming after landing
-DISARM_ALTITUDE_THRESHOLD = 0.05
-
-
 
 class StationaryLandingController:
 
@@ -280,7 +276,10 @@ class StationaryLandingController:
        # Apply proportional controls on the gain
         vx = Kp_xy * body_x
         vy = Kp_xy * body_y
-        vz = Kp_z  * body_z
+        if abs(body_z) < 0.1:
+            vz = 0
+        else:
+            vz = Kp_z * body_z
 
         # Clip velocities to max velocity
         vx = max(min(vx, MAX_VELOCITY), -MAX_VELOCITY)

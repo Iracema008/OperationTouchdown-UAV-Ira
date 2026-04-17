@@ -1,10 +1,10 @@
 import time
 import depthai as dai
-from Detectors.april_tag_detector import AprilTagDetector
-from PixhawkController.stationary_landing_controller import StationaryLandingController
+from vision.common.detectors.april_tag_detector import AprilTagDetector
+from pixhawk_controller.stationary_landing_controller import StationaryLandingController
 
 # Reminder: Make sure this matches what you found via 'ls /dev/tty*'
-CONNECTION_STRING = "/dev/serial0" 
+CONNECTION_STRING = "/dev/serial0"
 BAUDRATE = 57600
 LANDING_THRESHOLD = 1.5
 TAKEOFF_ALTITUDE = 3 # in meters
