@@ -14,8 +14,9 @@ UAV-ira/
     main.py
     core/         # Shared state, config, logging
     vision/       # ArUco detection + segmentation
-    landing/      # AprilTag landing + Pixhawk control
+    mision/      # AprilTag landing + Pixhawk control
     vio_slam/     # VO + loop closure
+    sitl/         # Flight simmulation w/ArduPilot
 
     tests/        # Hardware testing scripts (WIP)
     comms/        # UGV communication (WIP)
@@ -36,14 +37,13 @@ No module directly calls another. Threads read/write shared state and use events
 
 ### Hardware
 
-* DepthAI OAK camera
-* Pixhawk 6 (ArduPilot via QGroundControl)
-* Raspberry Pi or onboard computer
+* DepthAI OAK-D S2 camera
+* Pixhawk 6X (ArduPilot via QGroundControl)
+* Raspberry Pi 5 or onboard computer
 
 ### Software
 
 * Python 3.10+
-
 
 ## Setup
 
@@ -81,8 +81,8 @@ Key defaults:
 
 * Pixhawk connection: `/dev/serial0`
 * Baud rate: `57600`
-* Hover altitude: `3.0 m`
-* ArUco target ID: '4`
+* Hover altitude: `5.0 m`
+* ArUco target ID: '3, 7`
 
 Override Pixhawk port if needed:
 
@@ -112,6 +112,8 @@ Run landing only:
 python3 main.py --mode land
 ```
 
+## How to Run Simulator
+* Go into sitl folder for an in-depth explanation (SITL_SETUP.md)
 
 ## Runtime Behavior
 
