@@ -7,7 +7,7 @@ Software In The Loop (SITL) lets us test the full UAV pipeline without flying. W
 ## What you need
 
 - Mac with Intel chip (Apple Silicon works too, but needs Rosetta for some steps)
-- OAK-D S2 camera
+- OAK-D S2 camera (since our camera is bolted in, get a long usb-c to connect to your laptop)
 - QGroundControl installed (download at https://qgroundcontrol.com)
 - Python 3.10 or 3.11
 - Activatedt venv (`rtx_venv`)
