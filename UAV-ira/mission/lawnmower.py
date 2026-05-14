@@ -1,36 +1,13 @@
-"""
-lawnmower_mission.py
-
-Lawnmower search pattern controller that integrates with vo_full_v3.py.
-
-- Reads position from your existing VO_LK instance via vo.pose()
-- Sends MAVLink SET_POSITION_TARGET_LOCAL_NED via the existing pymavlink connection
-- Geofence defined in LOCAL meters from takeoff origin (0, 0, 0)
-- Runs in a background thread so VO loop continues uninterrupted
-
-Coordinate note:
-  Your VO frame:  x=right, y=down, z=forward
-  MAVLink NED:    x=North, y=East, z=Down (negative = up)
-  We work in a simple 2D local frame (forward/right) and let
-  MavlinkVisionPublisher handle the NED rotation via yaw_offset.
-  For mission commands we use MAV_FRAME_LOCAL_NED directly.
-
-Usage:
-  from lawnmower_mission import LawnmowerMission
-  mission = LawnmowerMission(vo=vo, mav_master=vision_pub.master)
-  mission.start()
-"""
-
 import math
 import time
 import threading
 import numpy as np
 from pymavlink import mavutil
 
-### make sure your drone is facing North at launch for the simplified frame to hold — or rotate the waypoints by your initial compass heading if not.
+### make sure your drone is facing North.
 MISSION_CONFIG = {
-    "flight_alt_m":   2.0,    # altitude AGL to fly the pattern
-    "takeoff_alt_m":  2.0,    # takeoff altitude before mission starts
+    "flight_alt_m":   4.0,
+    "takeoff_alt_m":  2.0,
 
     # Search box in local frame from takeoff origin
     # forward = +Z in camera frame / +X in NED (approximately)

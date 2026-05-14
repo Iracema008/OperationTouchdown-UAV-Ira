@@ -3,11 +3,11 @@
 import cv2
 import numpy as np
 
-from common.detectors.detector import Detector
-from common.utils.log import get_logger
+from vision.common.detectors.detector import Detector
+from core.log import get_logger
 
 logger = get_logger(__name__)
-#import os 
+#import os
 class Cv2Detector(Detector):
     
     """ArUco object detector.
