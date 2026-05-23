@@ -1,148 +1,181 @@
-# core/state.py
-import threading
-from dataclasses import dataclass, field
+# core/state_mp.py
+""" Switched to multiprocessing safe UAV state """
+
+import numpy as np
+from multiprocessing import shared_memory, Lock, Event
 from enum import Enum, auto
-from typing import Optional
+from dataclasses import dataclass
 import time
 
 
 class FlightMode(Enum):
-    IDLE    = auto()
-    SCAN    = auto()
-    HOVER   = auto()
-    LAND    = auto()
-    ABORT   = auto()
+    IDLE = auto()
+    SCAN = auto()
+    HOVER = auto()
+    LAND = auto()
+    ABORT = auto()
 
 
-@dataclass
-class Pose3D:
-    x: float = 0.0   # meters, body-frame forward
-    y: float = 0.0   # meters, body-frame right
-    z: float = 0.0   # meters, down positive (NED)
-    roll:  float = 0.0  # radians
-    pitch: float = 0.0
-    yaw:   float = 0.0
-    timestamp: float = field(default_factory=time.monotonic)
-
-
-@dataclass
-class PixhawkTelemetry:
-    armed: bool = False
-    mode: str = "UNKNOWN"
-    battery_voltage: float = 0.0
-    relative_altitude: float = 0.0  # meters AGL
-    heading: float = 0.0            # degrees
-    timestamp: float = field(default_factory=time.monotonic)
-
-
-class UAVState:
+def create_shared_state():
     """
-    Central shared state for all UAV subsystems.
-    All public methods are thread-safe.
-    Use Events to wait on state transitions — never spin-poll.
+    Create all shared memory blocks and multiprocessing primitives.
+    Call this ONCE from the main process before spawning children.
+    
+    Returns a dict of shared memory handles and locks/events.
     """
+    # VIO position: [x, y, z, yaw, timestamp]
+    shm_vio = shared_memory.SharedMemory(
+        create=True, size=8 * 5, name="uav_vio"
+    )
+    
+    # ArUco pose: [x, y, z, roll, pitch, yaw, marker_id, timestamp]
+    shm_aruco = shared_memory.SharedMemory(
+        create=True, size=8 * 8, name="uav_aruco"
+    )
+    
+    # April pose: [x, y, z, roll, pitch, yaw, timestamp]
+    shm_april = shared_memory.SharedMemory(
+        create=True, size=8 * 7, name="uav_april"
+    )
+    
+    # Pixhawk telemetry: [armed, battery_v, alt_m, heading_deg, timestamp]
+    # armed stored as float (0.0 or 1.0) for array uniformity
+    shm_telem = shared_memory.SharedMemory(
+        create=True, size=8 * 5, name="uav_telem"
+    )
+    
+    # Flight mode: single int
+    shm_mode = shared_memory.SharedMemory(
+        create=True, size=4, name="uav_mode"
+    )
+    
+    # Initialize all to zero
+    np.ndarray((5,), dtype=np.float64, buffer=shm_vio.buf)[:] = 0
+    np.ndarray((8,), dtype=np.float64, buffer=shm_aruco.buf)[:] = 0
+    np.ndarray((7,), dtype=np.float64, buffer=shm_april.buf)[:] = 0
+    np.ndarray((5,), dtype=np.float64, buffer=shm_telem.buf)[:] = 0
+    np.ndarray((1,), dtype=np.int32, buffer=shm_mode.buf)[0] = FlightMode.IDLE.value
+    
+    return {
+        "shm_vio": shm_vio,
+        "shm_aruco": shm_aruco,
+        "shm_april": shm_april,
+        "shm_telem": shm_telem,
+        "shm_mode": shm_mode,
+        "lock": Lock(),
+        "marker_confirmed": Event(),
+        "ugv_signal": Event(),
+        "hover_reached": Event(),
+    }
 
-    def __init__(self):
-        self._lock = threading.Lock()
 
-        # --- Vision ---
-        self._aruco_pose: Optional[Pose3D] = None
-        self._aruco_marker_id: Optional[int] = None
+def cleanup_shared_state(state_dict):
+    """Close and unlink all shared memory. Call from main process on exit."""
+    for key in ["shm_vio", "shm_aruco", "shm_april", "shm_telem", "shm_mode"]:
+        shm = state_dict[key]
+        shm.close()
+        shm.unlink()
 
-        # --- Landing ---
-        self._april_pose: Optional[Pose3D] = None
 
-        # --- SLAM / VIO ---
-        self._vio_position: Optional[Pose3D] = None
-
-        # --- Pixhawk telemetry ---
-        self._telemetry: PixhawkTelemetry = PixhawkTelemetry()
-
-        # --- Flight mode ---
-        self._flight_mode: FlightMode = FlightMode.IDLE
-
-        # --- Events (non-blocking wait primitives) ---
-        # Set once when aruco marker is confirmed; never cleared (latch)
-        self.marker_confirmed = threading.Event()
-        # Set by comms thread when UGV signals ready-to-land
-        self.ugv_signal = threading.Event()
-        # Set when drone reaches hover setpoint
-        self.hover_reached = threading.Event()
-
-    # ------------------------------------------------------------------ #
-    #  Aruco / vision                                                      #
-    # ------------------------------------------------------------------ #
-
-    def set_aruco_pose(self, pose: Pose3D, marker_id: int) -> None:
-        with self._lock:
-            self._aruco_pose = pose
-            self._aruco_marker_id = marker_id
-        self.marker_confirmed.set()   # latch — first valid detection fires this
-
-    def get_aruco_pose(self) -> tuple[Optional[Pose3D], Optional[int]]:
-        with self._lock:
-            return self._aruco_pose, self._aruco_marker_id
-
-    # ------------------------------------------------------------------ #
-    #  April tag / landing                                                 #
-    # ------------------------------------------------------------------ #
-
-    def set_april_pose(self, pose: Pose3D) -> None:
-        with self._lock:
-            self._april_pose = pose
-
-    def get_april_pose(self) -> Optional[Pose3D]:
-        with self._lock:
-            return self._april_pose
-
-    # ------------------------------------------------------------------ #
-    #  VIO / SLAM                                                          #
-    # ------------------------------------------------------------------ #
-
-    def set_vio_position(self, pose: Pose3D) -> None:
-        with self._lock:
-            self._vio_position = pose
-
-    def get_vio_position(self) -> Optional[Pose3D]:
-        with self._lock:
-            return self._vio_position
-
-    # ------------------------------------------------------------------ #
-    #  Pixhawk telemetry                                                   #
-    # ------------------------------------------------------------------ #
-
-    def set_telemetry(self, telem: PixhawkTelemetry) -> None:
-        with self._lock:
-            self._telemetry = telem
-
-    def get_telemetry(self) -> PixhawkTelemetry:
-        with self._lock:
-            return self._telemetry
-
-    # ------------------------------------------------------------------ #
-    #  Flight mode                                                         #
-    # ------------------------------------------------------------------ #
-
-    def set_flight_mode(self, mode: FlightMode) -> None:
-        with self._lock:
-            self._flight_mode = mode
-
-    def get_flight_mode(self) -> FlightMode:
-        with self._lock:
-            return self._flight_mode
-
-    # ------------------------------------------------------------------ #
-    #  Debug snapshot (safe to call any time)                              #
-    # ------------------------------------------------------------------ #
-
-    def snapshot(self) -> dict:
-        with self._lock:
+class UAVStateAccessor:
+    """
+    Accessor for shared UAV state from any process.
+    Each process creates its own accessor instance.
+    Do NOT pass this object between processes — it doesn't pickle.
+    Instead, each process calls UAVStateAccessor() independently.
+    """
+    
+    def __init__(self, lock, marker_confirmed, ugv_signal, hover_reached):
+        self.lock = lock
+        self.marker_confirmed = marker_confirmed
+        self.ugv_signal = ugv_signal
+        self.hover_reached = hover_reached
+        
+        # Map existing shared memory (created by main process)
+        self._shm_vio = shared_memory.SharedMemory(name="uav_vio")
+        self._shm_aruco = shared_memory.SharedMemory(name="uav_aruco")
+        self._shm_april = shared_memory.SharedMemory(name="uav_april")
+        self._shm_telem = shared_memory.SharedMemory(name="uav_telem")
+        self._shm_mode = shared_memory.SharedMemory(name="uav_mode")
+        
+        self._vio = np.ndarray((5,), dtype=np.float64, buffer=self._shm_vio.buf)
+        self._aruco = np.ndarray((8,), dtype=np.float64, buffer=self._shm_aruco.buf)
+        self._april = np.ndarray((7,), dtype=np.float64, buffer=self._shm_april.buf)
+        self._telem = np.ndarray((5,), dtype=np.float64, buffer=self._shm_telem.buf)
+        self._mode = np.ndarray((1,), dtype=np.int32, buffer=self._shm_mode.buf)
+    
+    def close(self):
+        """Close shared memory handles (does not unlink — main process does that)."""
+        self._shm_vio.close()
+        self._shm_aruco.close()
+        self._shm_april.close()
+        self._shm_telem.close()
+        self._shm_mode.close()
+    
+    # VIO
+    def set_vio_position(self, x, y, z, yaw):
+        with self.lock:
+            self._vio[0] = x
+            self._vio[1] = y
+            self._vio[2] = z
+            self._vio[3] = yaw
+            self._vio[4] = time.time()
+    
+    def get_vio_position(self):
+        with self.lock:
+            return tuple(self._vio[:4]), self._vio[4]
+    
+    # ArUco
+    def set_aruco_pose(self, x, y, z, marker_id):
+        with self.lock:
+            self._aruco[0] = x
+            self._aruco[1] = y
+            self._aruco[2] = z
+            self._aruco[6] = float(marker_id)
+            self._aruco[7] = time.time()
+        self.marker_confirmed.set()
+    
+    def get_aruco_pose(self):
+        with self.lock:
+            marker_id = int(self._aruco[6]) if self._aruco[6] != 0 else None
+            return (self._aruco[0], self._aruco[1], self._aruco[2]), marker_id
+    
+    # April
+    def set_april_pose(self, x, y, z):
+        with self.lock:
+            self._april[0] = x
+            self._april[1] = y
+            self._april[2] = z
+            self._april[6] = time.time()
+    
+    def get_april_pose(self):
+        with self.lock:
+            return tuple(self._april[:3])
+    
+    # Telemetry
+    def set_telemetry(self, armed, battery_v, alt_m, heading_deg):
+        with self.lock:
+            self._telem[0] = 1.0 if armed else 0.0
+            self._telem[1] = battery_v
+            self._telem[2] = alt_m
+            self._telem[3] = heading_deg
+            self._telem[4] = time.time()
+    
+    def get_telemetry(self):
+        with self.lock:
             return {
-                "flight_mode":        self._flight_mode.name,
-                "aruco_marker_id":    self._aruco_marker_id,
-                "marker_confirmed":   self.marker_confirmed.is_set(),
-                "ugv_signal":         self.ugv_signal.is_set(),
-                "hover_reached":      self.hover_reached.is_set(),
-                "vio_position":       self._vio_position,
-                "telemetry":          self._telemetry,
+                "armed": bool(self._telem[0]),
+                "battery_v": self._telem[1],
+                "alt_m": self._telem[2],
+                "heading_deg": self._telem[3],
+                "timestamp": self._telem[4],
             }
+    
+    # Flight mode
+    def set_flight_mode(self, mode: FlightMode):
+        with self.lock:
+            self._mode[0] = mode.value
+    
+    def get_flight_mode(self) -> FlightMode:
+        with self.lock:
+            return FlightMode(self._mode[0])
