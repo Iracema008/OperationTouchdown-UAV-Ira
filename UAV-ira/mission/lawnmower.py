@@ -15,26 +15,19 @@ logger = get_logger(__name__)
 
 FIELD_CONFIG = {
     "north_min_m":  0.0,
-    "north_max_m": 10.0,
+    "north_max_m":  5.0,   # 5m field
     "east_min_m":   0.0,
-    "east_max_m":  10.0,
-
-    "search_alt_m":  2.5,
+    "east_max_m":   5.0,   # 5m field
+    "search_alt_m": 3.0,
     "confirm_alt_m": 1.2,
-
-    "wp_accept_radius_m": 0.4,  # how close = arrived at waypoint
-    "wp_timeout_s":       20.0, # skip waypoint after this many seconds
-    "move_speed_ms":       1.2, # approximate drone speed (for logging only)
+    "wp_accept_radius_m": 0.4,
+    "wp_timeout_s":       20.0,
+    "move_speed_ms":       1.2,
 }
 
 LAWNMOWER_CONFIG = {
-    # Column spacing in metres. Set equal to or slightly less than the
-    # camera's ground footprint width at search_alt_m to guarantee full
-    # coverage with minimal overlap.
-    "col_spacing_m": 2.0,
-
-    # Row waypoint spacing within each N-S column.
-    "row_spacing_m": 2.0,
+    "col_spacing_m": 2.8,   # derived from real FOV at 2.5m altitude
+    "row_spacing_m": 2.0,   # waypoint spacing within each column
 }
 
 

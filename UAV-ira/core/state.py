@@ -37,18 +37,18 @@ def create_shared_state():
     shm_april = shared_memory.SharedMemory(
         create=True, size=8 * 7, name="uav_april"
     )
-    
+
     # Pixhawk telemetry: [armed, battery_v, alt_m, heading_deg, timestamp]
     # armed stored as float (0.0 or 1.0) for array uniformity
     shm_telem = shared_memory.SharedMemory(
         create=True, size=8 * 5, name="uav_telem"
     )
-    
+
     # Flight mode: single int
     shm_mode = shared_memory.SharedMemory(
         create=True, size=4, name="uav_mode"
     )
-    
+
     # Initialize all to zero
     np.ndarray((5,), dtype=np.float64, buffer=shm_vio.buf)[:] = 0
     np.ndarray((8,), dtype=np.float64, buffer=shm_aruco.buf)[:] = 0
@@ -134,12 +134,12 @@ class UAVStateAccessor:
             self._aruco[6] = float(marker_id)
             self._aruco[7] = time.time()
         self.marker_confirmed.set()
-    
+
     def get_aruco_pose(self):
         with self.lock:
             marker_id = int(self._aruco[6]) if self._aruco[6] != 0 else None
             return (self._aruco[0], self._aruco[1], self._aruco[2]), marker_id
-    
+
     # April
     def set_april_pose(self, x, y, z):
         with self.lock:
@@ -147,11 +147,11 @@ class UAVStateAccessor:
             self._april[1] = y
             self._april[2] = z
             self._april[6] = time.time()
-    
+
     def get_april_pose(self):
         with self.lock:
             return tuple(self._april[:3])
-    
+
     # Telemetry
     def set_telemetry(self, armed, battery_v, alt_m, heading_deg):
         with self.lock:
