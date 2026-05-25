@@ -41,17 +41,13 @@ from mission.pixhawk_controller.stationary_landing_controller import StationaryL
 # from vision.common.detectors.april_detector.april_tag_detector import AprilTagDetector
 
 # Lawnmower — functional API, reacts to marker_confirmed Event from run_vision
-from mission.lawnmower_search import run_lawnmower_mission
+from mission.lawnmower import run_lawnmower_mission
 
 # Telemetry
 from telemetry.telemetry_logger import telemetry_logger
 
 logger = get_logger(__name__)
 
-
-# ===========================================================================
-# Process 1: SLAM (VIO with loop closure)
-# ===========================================================================
 
 def run_slam(lock, marker_confirmed, ugv_signal, hover_reached, cfg):
     """
