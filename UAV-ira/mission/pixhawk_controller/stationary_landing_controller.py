@@ -37,6 +37,10 @@ class StationaryLandingController:
         print("Heartbeat Received & Connection Established")
         print(f"Source System: {self.master.source_system}, Source Component: {self.master.source_component}, Target System: {self.master.target_system}, Target Component: {self.master.target_component}, Connection Type: {connection_string}, Baudrate: {baudrate}")
         print("[INFO] Pixhawk Connected")
+
+        self.prev_x = 0
+        self.prev_y = 0
+        self.prev_z = 0
     
     def heartbeat(self):
         print("Waiting for heartbeat from Pixhawk...")
@@ -273,15 +277,39 @@ class StationaryLandingController:
         """
         Apply proportional control and send velocity command
         """
-       # Apply proportional controls on the gain
+        alpha = 0.9
+        self.prev_x = alpha*self.prev_x + (1-alpha)*body_x
+        self.prev_y = alpha*self.prev_y + (1-alpha)*body_y
+        self.prev_z = alpha*self.prev_z + (1-alpha)*body_z
+
+        body_x = self.prev_x
+        body_y = self.prev_y
+        body_z = self.prev_z
+
+        # this basically makes sure that we arent sending movement if we are already close, so we avoid jerky movements
+        if body_z > 2.0:
+            thresh = 0.05
+        elif body_z > 1.0:
+            thresh = 0.08
+        else:
+            thresh = 0.12
+
+        body_x = 0 if abs(body_x) < thresh else body_x
+        body_y = 0 if abs(body_y) < thresh else body_y
+
+        TARGET_Z = 0.3
+        error_z = body_z - TARGET_Z
+
         vx = Kp_xy * body_x
         vy = Kp_xy * body_y
-        if abs(body_z) < 0.1:
-            vz = 0
-        else:
-            vz = Kp_z * body_z
+        vz = 0 if abs(error_z) < 0.15 else Kp_z * error_z
 
-        # Clip velocities to max velocity
+        # slow down near landing
+        if body_z < 0.5:
+            vx *= 0.5
+            vy *= 0.5
+
+        # Clip velocities
         vx = max(min(vx, MAX_VELOCITY), -MAX_VELOCITY)
         vy = max(min(vy, MAX_VELOCITY), -MAX_VELOCITY)
         vz = max(min(vz, MAX_VELOCITY), -MAX_VELOCITY)

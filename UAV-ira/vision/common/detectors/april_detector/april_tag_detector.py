@@ -3,7 +3,7 @@
 #
 # Assumptions:
 # - Tag family: 36h11
-# - Target tag ID: 0
+# - Target tag ID: 67
 # - Tag size: 20 cm (0.20 meters)
 
 import cv2
@@ -24,13 +24,37 @@ class AprilTagDetector:
         Initialize AprilTag detector using calibration
         from the OAK-D S2.
         """
-        # Load the camera intrinsics from the OAK-D calibration handler
-        #
-        # NOTE: This assumes we are using full resolution RGB stream for detection.
-        intrinsics = calibration_handler.getCameraIntrinsics(
-            dai.CameraBoardSocket.RGB,
-            1920,
-            1080
+        self.calibration_handler = calibration_handler 
+
+        self.camera_matrix = None
+        self.dist_coeffs = None
+
+        self.FX = None
+        self.FY = None
+        self.CX = None
+        self.CY = None
+
+        print("[INFO] Detector initialized (intrinsics will be set on first frame)")
+
+        self.detector = Detector(
+            families="tag36h11",
+            nthreads=1,
+            quad_decimate=1.0,
+            quad_sigma=0.0,
+            refine_edges=1,
+            decode_sharpening=0.25
+        )
+
+    def _update_intrinsics(self, frame):
+        """
+        Update the camera intrinsics based on the current frame size.
+        """
+        h, w = frame.shape[:2]
+
+        intrinsics = self.calibration_handler.getCameraIntrinsics(
+            dai.CameraBoardSocket.CAM_A,
+            w,
+            h
         )
 
         self.camera_matrix = np.array(intrinsics)
@@ -40,27 +64,14 @@ class AprilTagDetector:
         self.CX = self.camera_matrix[0][2]
         self.CY = self.camera_matrix[1][2]
 
-        print("[INFO] Camera Intrinsics Loaded")
-
         # Load distortion coefficients as well (the detector needs them)
         self.dist_coeffs = np.array(
-            calibration_handler.getDistortionCoefficients(
-                dai.CameraBoardSocket.RGB
-            )
-        )
+            self.calibration_handler.getDistortionCoefficients(
+            dai.CameraBoardSocket.CAM_A
+        )[:5]
+)
 
-        print("[INFO] Distortion Coefficients Loaded")
-
-       # Configure to just look for our family of tags
-        self.detector = Detector(
-            families="tag36h11",
-            nthreads=1,
-            quad_decimate=2.0,
-            quad_sigma=0.0,
-            refine_edges=1,
-            decode_sharpening=0.25
-        )
-
+        print(f"[INFO] Intrinsics updated for {w}x{h}")
 
     def get_tag_pose(self, frame):
         """
@@ -78,6 +89,9 @@ class AprilTagDetector:
 
         if frame is None:
             return None
+
+        if self.camera_matrix is None:
+            self._update_intrinsics(frame)
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
