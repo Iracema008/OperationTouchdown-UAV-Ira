@@ -48,6 +48,12 @@ class VideoConfig:
     width:      int  = 640
     height:     int  = 480
     show_video: bool = False   # set True for ground testing with monitor
+    
+    # from camera intrinsics we get these:
+    # fov_h = 2 * atan(640 / (2 * 518.57)) ≈ 63.8°
+    # fov_v = 2 * atan(480 / (2 * 518.34)) ≈ 49.9°
+    fov_h:      float = 63.8
+    fov_v:      float = 49.9
 
 
 @dataclass
@@ -76,7 +82,10 @@ class AprilTagConfig:
 
 @dataclass
 class PixhawkConfig:
-    connection_string: str = "/dev/serial0"   # swap to "udp:127.0.0.1:14550" for SITL
+    connection_string: str = "/dev/serial0"   # swap to "udp:127.0.0.1:14550" for SITL@dataclass
+    #connection_string: str = "udp:0.0.0.0:14550"
+    
+    baud_rate: int = 57600
     baud_rate: int = 57600                    # correct for Pi UART to Pixhawk
     hover_altitude_m: float = 3.0
     land_speed_ms:    float = 0.3             # descent speed m/s

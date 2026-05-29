@@ -9,7 +9,7 @@ from core.log import get_logger
 logger = get_logger(__name__)
 #import os
 class Cv2Detector(Detector):
-    
+
     """ArUco object detector.
 
     This detector is a wrapper for CV2 aruco marker detection. It does not use a vision model. It

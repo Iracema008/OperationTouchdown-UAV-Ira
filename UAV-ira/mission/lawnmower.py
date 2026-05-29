@@ -1,4 +1,22 @@
-""" lawnmower.py search"""
+"""
+lawnmower.py
+
+Boustrophedon (lawnmower) field search for a GPS-denied UAV using Visual
+Odometry. Planner-agnostic — supports two path strategies selected at
+runtime via the `planner` argument:
+
+    planner="grid"  → plain boustrophedon order, no optimisation, no replan
+    planner="sa"    → SA-optimised order (pre-flight) + mid-flight replan
+                      (all SA math lives in simulated_annealing.py)
+
+This separation lets you A/B test the two strategies with the same flight
+code. SA logic is intentionally NOT in this file — see simulated_annealing.py.
+
+Field coordinate system:
+    Origin (0, 0) = drone launch point
+    North (+X NED) = forward from launch heading
+    East  (+Y NED) = right from launch heading
+"""
 
 import math
 import time
@@ -10,14 +28,17 @@ from pymavlink import mavutil
 from core.log import get_logger
 from mission.pixhawk_controller.stationary_landing_controller import StationaryLandingController
 
+# SA planner — only used when planner="sa"
+from mission.simulated_annealing import build_sa_waypoints, replan_remaining
+
 logger = get_logger(__name__)
 
 
 FIELD_CONFIG = {
     "north_min_m":  0.0,
-    "north_max_m":  5.0,   # 5m field
+    "north_max_m":  5.0,
     "east_min_m":   0.0,
-    "east_max_m":   5.0,   # 5m field
+    "east_max_m":   5.0,
     "search_alt_m": 3.0,
     "confirm_alt_m": 1.2,
     "wp_accept_radius_m": 0.4,
@@ -26,9 +47,11 @@ FIELD_CONFIG = {
 }
 
 LAWNMOWER_CONFIG = {
-    "col_spacing_m": 2.8,   # derived from real FOV at 2.5m altitude
-    "row_spacing_m": 2.0,   # waypoint spacing within each column
+    # Derived from OAK-D S2 real intrinsics at 640x480, 3m altitude, 10% overlap
+    "col_spacing_m": 2.8,
+    "row_spacing_m": 2.0,
 }
+
 
 
 def dist2d(a: tuple, b: tuple) -> float:
@@ -38,14 +61,15 @@ def dist2d(a: tuple, b: tuple) -> float:
 
 def vo_north_east(vo) -> tuple:
     """
-    Return current (north, east) from a VO object.
-    Assumes VO pos layout: [x_right, y_down, z_forward]
+    Return current (north, east) from VO object.
+    VO pos layout: [x_right, y_down, z_forward]
     """
     pos, _ = vo.pose()
     return float(pos[2]), float(pos[0])
 
+
 def send_goto_ned(master, north: float, east: float, down: float):
-    """Send a LOCAL_NED position setpoint to the Pixhawk."""
+    """Send LOCAL_NED position setpoint to Pixhawk."""
     type_mask = (
         mavutil.mavlink.POSITION_TARGET_TYPEMASK_VX_IGNORE |
         mavutil.mavlink.POSITION_TARGET_TYPEMASK_VY_IGNORE |
@@ -71,15 +95,11 @@ def send_goto_ned(master, north: float, east: float, down: float):
 
 def build_lawnmower_waypoints(cfg: dict, lm_cfg: dict) -> list:
     """
-    Generate a boustrophedon (lawnmower) waypoint list.
+    Generate the base boustrophedon grid waypoints.
+    Returns list of (north, east) tuples in raw sweep order.
 
-    Pattern:
-        Column 0 (east=east_min): fly North -> South
-        Column 1 (east+=spacing): fly South -> North
-        Column 2 (east+=spacing): fly North -> South
-        ...
-
-    Returns list of (north, east) tuples in flight order.
+    This is the "grid" planner output. The "sa" planner takes this list
+    and reorders it via simulated_annealing.build_sa_waypoints().
     """
     waypoints   = []
     col_spacing = lm_cfg["col_spacing_m"]
@@ -104,16 +124,15 @@ def build_lawnmower_waypoints(cfg: dict, lm_cfg: dict) -> list:
             while north >= north_min - 1e-6:
                 waypoints.append((north, east))
                 north -= row_spacing
-
         east += col_spacing
         col_idx += 1
 
     logger.info(
-        f"[Lawnmower] Generated {len(waypoints)} waypoints "
-        f"({col_idx} columns, {row_spacing}m row spacing, "
-        f"{col_spacing}m column spacing)"
+        f"[Lawnmower] Generated {len(waypoints)} grid waypoints "
+        f"({col_idx} columns)"
     )
     return waypoints
+
 
 def navigate_to(master, vo, cfg: dict,
                 north: float, east: float, down: float,
@@ -121,11 +140,10 @@ def navigate_to(master, vo, cfg: dict,
                 marker_confirmed,
                 stop_event: threading.Event) -> bool:
     """
-    Fly to a NED position and block until arrival or timeout.
+    Fly to NED position, block until arrival or timeout.
 
-    Polls marker_confirmed (multiprocessing.Event from run_vision) and
-    stop_event on every 100ms tick — returns False immediately if either
-    fires so the sweep can be abandoned with no delay.
+    Polls marker_confirmed and stop_event every 100ms — returns False
+    immediately if either fires so the sweep aborts with no delay.
 
     Returns
     -------
@@ -145,15 +163,13 @@ def navigate_to(master, vo, cfg: dict,
 
         if time.time() - t_start > timeout:
             logger.warning(
-                f"[Lawnmower] WP timeout {label} "
-                f"N={north:.1f} E={east:.1f}"
+                f"[Lawnmower] WP timeout {label} N={north:.1f} E={east:.1f}"
             )
             return False
 
         if marker_confirmed.is_set():
             logger.info(
-                f"[Lawnmower] marker_confirmed mid-transit — "
-                f"aborting leg to {label}"
+                f"[Lawnmower] marker_confirmed mid-transit — aborting {label}"
             )
             return False
 
@@ -170,24 +186,10 @@ def fly_to_marker_and_land(master, vo, cfg: dict,
                             on_confirmed,
                             mission_state: dict):
     """
-    Descend to confirm altitude over the VO-snapshotted marker position,
-    then call StationaryLandingController.stationary_landing().
+    Descend to confirm altitude over marker VO position, then land.
 
-    Parameters
-    ----------
-    master      : pymavlink connection (used for NED setpoints during descent)
-    vo          : VO adapter (.pose())
-    cfg         : FIELD_CONFIG dict
-    controller  : StationaryLandingController — used for the final land command
-    north/east  : VO position snapshotted when marker_confirmed fired
-    marker_confirmed : multiprocessing.Event
-    stop_event  : threading.Event (internal abort)
-    on_confirmed: optional callback(north, east) for logging/telemetry
-    mission_state: dict updated in place on success
-
-    NOTE: When re-enabling AprilTag precision landing, comment out the
-    stationary_landing() call below and instead let run_landing take over
-    once marker_confirmed is set. The lawnmower would just descend and hold.
+    NOTE: When re-enabling AprilTag precision landing, comment out
+    stationary_landing() + disarm_motors() and let run_landing take over.
     """
     confirm_down = -cfg["confirm_alt_m"]
 
@@ -196,7 +198,6 @@ def fly_to_marker_and_land(master, vo, cfg: dict,
         f"N={north:.2f} E={east:.2f} at {cfg['confirm_alt_m']}m"
     )
 
-    # Descend to confirm altitude over the marker
     navigate_to(
         master, vo, cfg,
         north, east, confirm_down,
@@ -208,11 +209,9 @@ def fly_to_marker_and_land(master, vo, cfg: dict,
     if stop_event.is_set():
         return
 
-    # Log VO position at landing point for post-flight analysis
     final_north, final_east = vo_north_east(vo)
     logger.info(
-        f"[Lawnmower] At confirm altitude — "
-        f"VO position N={final_north:.2f} E={final_east:.2f}"
+        f"[Lawnmower] At confirm altitude — VO N={final_north:.2f} E={final_east:.2f}"
     )
 
     mission_state["valid_marker_confirmed"]    = True
@@ -221,18 +220,10 @@ def fly_to_marker_and_land(master, vo, cfg: dict,
     if on_confirmed:
         on_confirmed(final_north, final_east)
 
-    # ------------------------------------------------------------------
-    # LANDING — using StationaryLandingController
-    #
-    # TODO: When AprilTag precision landing is re-enabled in main.py,
-    #       comment out the two lines below. The lawnmower will just
-    #       hold position here and run_landing will take over via the
-    #       marker_confirmed Event.
-    # ------------------------------------------------------------------
+    # TODO: comment these two lines out when re-enabling AprilTag landing
     logger.info("[Lawnmower] Calling stationary_landing()")
     controller.stationary_landing()
     controller.disarm_motors()
-    # ------------------------------------------------------------------
 
     stop_event.set()
 
@@ -241,34 +232,67 @@ def run_flight_loop(master, vo, cfg: dict,
                     waypoints: list,
                     controller: StationaryLandingController,
                     marker_confirmed,
+                    uncertain_pos,
                     stop_event: threading.Event,
                     on_confirmed,
-                    mission_state: dict):
+                    mission_state: dict,
+                    planner: str = "grid"):
     """
-    Main lawnmower flight loop — runs in a background thread.
+    Main lawnmower flight loop.
 
-    Iterates waypoints and polls marker_confirmed (multiprocessing.Event)
-    set by run_vision in main.py. When set, snapshots the current VO
-    position and calls fly_to_marker_and_land().
+    planner="grid":
+        Fly waypoints in given order. uncertain_pos is ignored — no replan.
+
+    planner="sa":
+        Same flight, but when uncertain_pos[2] == 1.0 (vision saw valid ID
+        2 consecutive times) the remaining unvisited waypoints are
+        reordered ONCE via simulated_annealing.replan_remaining().
+
+    marker_confirmed (multiprocessing.Event) is the authoritative landing
+    signal regardless of planner — it aborts the sweep immediately.
+
+    uncertain_pos: multiprocessing.Array('d', [north, east, flag])
     """
     search_down = -cfg["search_alt_m"]
     total       = len(waypoints)
+    replan_done = False
+    use_sa      = (planner == "sa")
 
-    for idx, (north, east) in enumerate(waypoints):
+    idx = 0
+    while idx < len(waypoints):
         if stop_event.is_set():
             break
 
-        # Check before each waypoint in case vision fired between legs
         if marker_confirmed.is_set():
             logger.info(
-                f"[Lawnmower] marker_confirmed before WP {idx + 1} "
-                f"— aborting sweep"
+                f"[Lawnmower] marker_confirmed before WP {idx + 1} — aborting"
             )
             break
 
+        # --------------------------------------------------------------
+        # SA REPLAN (only in sa mode, only once)
+        # --------------------------------------------------------------
+        if use_sa and not replan_done and uncertain_pos[2] == 1.0:
+            detection_pos = (uncertain_pos[0], uncertain_pos[1])
+            current_pos   = vo_north_east(vo)
+            remaining     = waypoints[idx:]
+
+            logger.info(
+                f"[Lawnmower] SA replan triggered — detection "
+                f"N={detection_pos[0]:.2f} E={detection_pos[1]:.2f}, "
+                f"{len(remaining)} waypoints remaining"
+            )
+
+            replanned   = replan_remaining(remaining, current_pos, detection_pos)
+            waypoints   = waypoints[:idx] + replanned
+            total       = len(waypoints)
+            replan_done = True
+
+        north, east = waypoints[idx]
+
         logger.info(
-            f"[Lawnmower] WP {idx + 1}/{total} -> "
-            f"N={north:.1f} E={east:.1f}"
+            f"[Lawnmower] WP {idx + 1}/{total} -> N={north:.1f} E={east:.1f}"
+            f"{' [SA]' if replan_done else ''}"
         )
 
         navigate_to(
@@ -282,7 +306,9 @@ def run_flight_loop(master, vo, cfg: dict,
         if marker_confirmed.is_set():
             break
 
-    # Marker confirmed at some point during the sweep
+        idx += 1
+
+    # Marker confirmed during sweep — fly to it and land
     if marker_confirmed.is_set() and not stop_event.is_set():
         snap_north, snap_east = vo_north_east(vo)
         logger.info(
@@ -302,48 +328,46 @@ def run_flight_loop(master, vo, cfg: dict,
 
     if not mission_state["valid_marker_confirmed"]:
         logger.info("[Lawnmower] Sweep complete — valid marker not found")
+        stop_event.set()
 
 
 def start_lawnmower_search(mav_master, vo,
                             valid_ids: list,
                             marker_confirmed,
+                            uncertain_pos,
                             controller: StationaryLandingController,
+                            planner: str = "grid",
                             field_cfg: dict = None,
                             lm_cfg: dict = None,
                             on_confirmed=None) -> dict:
     """
-    Launch the lawnmower flight in a background thread. Non-blocking.
+    Launch lawnmower search in a background thread. Non-blocking.
 
-    Parameters
-    ----------
-    mav_master       : pymavlink connection to Pixhawk
-    vo               : VO adapter with .pose() -> (np.ndarray[x,y,z], yaw)
-    valid_ids        : list of valid ArUco IDs (for logging)
-    marker_confirmed : multiprocessing.Event set by run_vision in main.py
-    controller       : StationaryLandingController for final land command
-    field_cfg        : override FIELD_CONFIG
-    lm_cfg           : override LAWNMOWER_CONFIG
-    on_confirmed     : optional callback(north, east)
+    planner : "grid" (plain sweep) or "sa" (SA-optimised + replan)
 
-    Returns
-    -------
-    mission_state dict:
-        {
-            "valid_marker_confirmed":    bool,
-            "confirmed_marker_position": (north, east) | None,
-            "stop_event":                threading.Event,
-        }
+    Returns mission_state dict the caller can poll.
     """
     cfg = field_cfg or FIELD_CONFIG
     lm  = lm_cfg   or LAWNMOWER_CONFIG
 
-    waypoints  = build_lawnmower_waypoints(cfg, lm)
+    # Always build the base grid first
+    grid = build_lawnmower_waypoints(cfg, lm)
+
+    # Planner selection — this is the ONLY branch that differs between modes
+    if planner == "sa":
+        waypoints = build_sa_waypoints(grid, start_pos=(0.0, 0.0))
+        logger.info("[Lawnmower] Planner = SA (optimised order + replan)")
+    else:
+        waypoints = grid
+        logger.info("[Lawnmower] Planner = GRID (plain boustrophedon)")
+
     stop_event = threading.Event()
 
     mission_state = {
         "valid_marker_confirmed":    False,
         "confirmed_marker_position": None,
         "stop_event":                stop_event,
+        "planner":                   planner,
     }
 
     flight_thread = threading.Thread(
@@ -353,9 +377,11 @@ def start_lawnmower_search(mav_master, vo,
             waypoints,
             controller,
             marker_confirmed,
+            uncertain_pos,
             stop_event,
             on_confirmed,
             mission_state,
+            planner,
         ),
         daemon=True,
         name="LawnmowerFlight",
@@ -363,8 +389,8 @@ def start_lawnmower_search(mav_master, vo,
     flight_thread.start()
 
     logger.info(
-        f"[Lawnmower] Search started — "
-        f"{len(waypoints)} waypoints, valid IDs={list(valid_ids)}"
+        f"[Lawnmower] Search started — {len(waypoints)} waypoints, "
+        f"planner={planner}, valid IDs={list(valid_ids)}"
     )
     return mission_state
 
@@ -372,32 +398,26 @@ def start_lawnmower_search(mav_master, vo,
 def run_lawnmower_mission(mav_master, vo,
                            valid_ids: list,
                            marker_confirmed,
+                           uncertain_pos,
                            controller: StationaryLandingController,
+                           planner: str = "grid",
                            field_cfg: dict = None,
                            lm_cfg: dict = None,
                            on_confirmed=None) -> dict:
     """
     Blocking version of start_lawnmower_search.
 
-    Blocks until marker confirmed and landed, or field exhausted.
-    Returns the mission_state dict.
+    planner : "grid" or "sa"
 
-    Usage:
-        state = run_lawnmower_mission(
-            mav_master=controller.master,
-            vo=vo_adapter,
-            valid_ids=[3, 7],
-            marker_confirmed=marker_confirmed,
-            controller=controller,
-        )
-        if state["valid_marker_confirmed"]:
-            pos = state["confirmed_marker_position"]
+    Blocks until marker confirmed and landed, or field exhausted.
     """
     mission_state = start_lawnmower_search(
         mav_master, vo,
         valid_ids=valid_ids,
         marker_confirmed=marker_confirmed,
+        uncertain_pos=uncertain_pos,
         controller=controller,
+        planner=planner,
         field_cfg=field_cfg,
         lm_cfg=lm_cfg,
         on_confirmed=on_confirmed,
@@ -418,40 +438,12 @@ def run_lawnmower_mission(mav_master, vo,
     if mission_state["valid_marker_confirmed"]:
         pos = mission_state["confirmed_marker_position"]
         logger.info(
-            f"[LawnmowerRunner] Mission complete — "
+            f"[LawnmowerRunner] Mission complete ({planner}) — "
             f"landed at N={pos[0]:.2f} E={pos[1]:.2f}"
         )
     else:
         logger.warning(
-            "[LawnmowerRunner] Mission ended — valid marker not found"
+            f"[LawnmowerRunner] Mission ended ({planner}) — marker not found"
         )
 
     return mission_state
-
-
-
-
-# later on we can calculate fov based on oak intrinsics
-# that means we can calculate column spacing based on altitude and desired overlap
-
-'''
-def compute_col_spacing(focal_length_px: float, frame_width_px: int,
-                         search_alt_m: float,
-                         overlap: float = 0.1) -> float:
-    """
-    Compute column spacing from camera intrinsics.
-
-    overlap: fraction of footprint to overlap between columns (0.1 = 10%)
-    A small overlap guarantees no gap even with slight VO drift.
-    """
-    fov_rad       = 2 * math.atan(frame_width_px / (2 * focal_length_px))
-    footprint_w   = 2 * search_alt_m * math.tan(fov_rad / 2)
-    col_spacing   = footprint_w * (1.0 - overlap)
-
-    logger.info(
-        f"[Lawnmower] FOV={math.degrees(fov_rad):.1f}° "
-        f"footprint={footprint_w:.2f}m "
-        f"col_spacing={col_spacing:.2f}m"
-    )
-    return col_spacing
-    '''
