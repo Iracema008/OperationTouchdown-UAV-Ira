@@ -31,11 +31,11 @@ from vio_slam.vo_full_v3 import (
     FPS, W, H, IMU_HZ
 )
 
-from vision.common.detectors.detector_manager import DetectorManager
-from vision.common.video.camera_coordinate_transformer import CameraCoordinateTransformer
-from mission.pixhawk_controller.stationary_landing_controller import StationaryLandingController
+from vision.detectors.detector_manager import DetectorManager
+from vision.video.camera_coordinate_transformer import CameraCoordinateTransformer
+from landing.pixhawk_controller.stationary_landing_controller import StationaryLandingController
 # from vision.common.detectors.april_detector.april_tag_detector import AprilTagDetector
-from mission.lawnmower import run_lawnmower_mission
+from path_planning.lawnmower import run_lawnmower_mission
 from telemetry.telemetry_logger import telemetry_logger
 
 logger = get_logger(__name__)

@@ -14,7 +14,8 @@ terrain/
 vo_depthai_v3_*.csv
 logs/
 *.log
+*.waypoints
 .vscode/
 .idea/
-
-
+flight_logs/
+lawnmower_original.py

@@ -1,10 +1,6 @@
 """
 lawnmower.py
 
-Boustrophedon (lawnmower) field search for a GPS-denied UAV using Visual
-Odometry. Planner-agnostic — supports two path strategies selected at
-runtime via the `planner` argument:
-
     planner="grid"  → plain boustrophedon order, no optimisation, no replan
     planner="sa"    → SA-optimised order (pre-flight) + mid-flight replan
                       (all SA math lives in simulated_annealing.py)
@@ -26,10 +22,10 @@ from typing import Optional
 from pymavlink import mavutil
 
 from core.log import get_logger
-from mission.pixhawk_controller.stationary_landing_controller import StationaryLandingController
+from landing.pixhawk_controller.stationary_landing_controller import StationaryLandingController
 
 # SA planner — only used when planner="sa"
-from mission.simulated_annealing import build_sa_waypoints, replan_remaining
+from path_planning.simulated_annealing import build_sa_waypoints, replan_remaining
 
 logger = get_logger(__name__)
 
@@ -48,6 +44,7 @@ FIELD_CONFIG = {
 
 LAWNMOWER_CONFIG = {
     # Derived from OAK-D S2 real intrinsics at 640x480, 3m altitude, 10% overlap
+    # TODO: need to switch this to 640 by 400 .
     "col_spacing_m": 2.8,
     "row_spacing_m": 2.0,
 }
@@ -228,15 +225,9 @@ def fly_to_marker_and_land(master, vo, cfg: dict,
     stop_event.set()
 
 
-def run_flight_loop(master, vo, cfg: dict,
-                    waypoints: list,
-                    controller: StationaryLandingController,
-                    marker_confirmed,
-                    uncertain_pos,
-                    stop_event: threading.Event,
-                    on_confirmed,
-                    mission_state: dict,
-                    planner: str = "grid"):
+def run_flight_loop(master, vo, cfg: dict, waypoints: list,  controller: StationaryLandingController,
+                    marker_confirmed, uncertain_pos, stop_event: threading.Event, on_confirmed,
+                    mission_state: dict, planner: str = "grid"):
     """
     Main lawnmower flight loop.
 

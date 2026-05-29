@@ -1,8 +1,8 @@
 import time
 import depthai as dai
 
-from vision.common.detectors.april_detector.april_tag_detector import AprilTagDetector
-from mission.pixhawk_controller import (
+from vision.detectors.april_detector.april_tag_detector import AprilTagDetector
+from landing.pixhawk_controller import (
     StationaryLandingController
 )
 
