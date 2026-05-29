@@ -16,8 +16,10 @@ import time
 
 # These are proportional control gains (adjust as needed for testing) 
 # Controls how aggressively we move to the tag
-Kp_xy = 0.4
-Kp_z  = 0.3
+Kp_xy = 0.5
+Kp_z  = 0.4
+Ki_xy = 0.1
+Kd_xy = 0.25
 
 # Safety limit on velocity commands (adjust as we test)
 MAX_VELOCITY = 0.3
@@ -41,6 +43,15 @@ class StationaryLandingController:
         self.prev_x = 0
         self.prev_y = 0
         self.prev_z = 0
+
+        self.integral_x = 0.0
+        self.integral_y = 0.0
+        self.last_vx = 0.0
+        self.last_vy = 0.0
+
+        self.last_error_x = 0.0
+        self.last_error_y = 0.0
+        self.last_time = time.time()
     
     def heartbeat(self):
         print("Waiting for heartbeat from Pixhawk...")
@@ -273,11 +284,66 @@ class StationaryLandingController:
 
         return body_x, body_y, body_z
     
+    def smart_touchdown(self, timeout=8.0):
+        """
+        Send a steady downward velocity and monitor Pixhawk telemetry to 
+        detect when physical downward movement stops (touchdown).
+        """
+        print("[INFO] Initiating smart descent to touchdown...")
+        start_time = time.time()
+        first_stopped_time = None
+        
+        # Flush the buffer of old VFR_HUD messages so we don't read past telemetry
+        while self.master.recv_match(type='VFR_HUD', blocking=False):
+            pass
+            
+        # Push down until we detect the floor OR the timeout is reached
+        while time.time() - start_time < timeout:
+            # Command 0.2 m/s straight down
+            self.send_velocity(0.0, 0.0, 0.2) 
+            
+            # Pull the latest HUD telemetry to check actual climb rate
+            msg = self.master.recv_match(type='VFR_HUD', blocking=True, timeout=0.1)
+            
+            if msg:
+                # msg.climb is the vertical speed in m/s.
+                # If it is near 0 (e.g., < 0.1 m/s), the drone is physically blocked by the floor.
+                # We wait 1 second before checking to give the drone time to build downward momentum first.
+                if abs(msg.climb) < 0.1 and (time.time() - start_time > 1.0):
+                    if first_stopped_time is None:
+                        first_stopped_time = time.time()
+                        
+                    # If it has been physically stopped for 0.5 consecutive seconds, it is landed
+                    if time.time() - first_stopped_time >= 0.5:
+                        print(f"[INFO] Touchdown detected! Vertical speed flatlined at {msg.climb:.2f} m/s.")
+                        break
+                else:
+                    # Drone is still moving down, reset the stopped timer
+                    first_stopped_time = None
+            else:
+                # If no message caught, just sleep briefly to stabilize
+                time.sleep(0.05)
+                
+        print("[INFO] Touchdown sequence finished.")
+
+    def coast_on_last_velocity(self, boost_multiplier=1.2, vertical_velocity=0.0):
+        """
+        Keep moving in the last known direction with a boost multiplier 
+        to ensure we don't fall behind a moving target while blind.
+        """
+        boosted_vx = self.last_vx * boost_multiplier
+        boosted_vy = self.last_vy * boost_multiplier
+        
+        # We can also handle the vertical velocity here for the search phase
+        self.send_velocity(boosted_vx, boosted_vy, vertical_velocity)
+
     def adjust_velocity_and_send(self, body_x, body_y, body_z):
         """
-        Apply proportional control and send velocity command
+        Apply full PID (Proportional-Integral-Derivative) control, 
+        gain scheduling, anti-ground effect, and send velocity command.
         """
-        alpha = 0.9
+        # --- 1. Signal Smoothing ---
+        alpha = 0.7
         self.prev_x = alpha*self.prev_x + (1-alpha)*body_x
         self.prev_y = alpha*self.prev_y + (1-alpha)*body_y
         self.prev_z = alpha*self.prev_z + (1-alpha)*body_z
@@ -286,32 +352,74 @@ class StationaryLandingController:
         body_y = self.prev_y
         body_z = self.prev_z
 
-        # this basically makes sure that we arent sending movement if we are already close, so we avoid jerky movements
-        if body_z > 2.0:
-            thresh = 0.05
-        elif body_z > 1.0:
-            thresh = 0.08
-        else:
-            thresh = 0.12
+        # --- 2. Predictive Tracking (Derivative Control) ---
+        current_time = time.time()
+        dt = current_time - self.last_time
+        if dt <= 0: 
+            dt = 0.01  # Prevent division by zero
 
+        derivative_x = (body_x - self.last_error_x) / dt
+        derivative_y = (body_y - self.last_error_y) / dt
+
+        self.last_error_x = body_x
+        self.last_error_y = body_y
+        self.last_time = current_time
+
+        # --- 3. Gain Scheduling & Dynamic Thresholding ---
+        if body_z < 0.5:
+            thresh = 0.10  
+            current_kp_xy = Kp_xy * 0.4  
+            current_max_vel = MAX_VELOCITY * 0.5 
+        elif body_z < 2.0:
+            thresh = 0.10  
+            current_kp_xy = Kp_xy * 0.7
+            current_max_vel = MAX_VELOCITY * 0.8
+        else:
+            thresh = 0.05  
+            current_kp_xy = Kp_xy
+            current_max_vel = MAX_VELOCITY
+
+        # Apply deadband
         body_x = 0 if abs(body_x) < thresh else body_x
         body_y = 0 if abs(body_y) < thresh else body_y
 
-        TARGET_Z = 0.3
+        # --- 4. Speed Matching (Integral Control) ---
+        if abs(body_x) > 0:
+            self.integral_x += body_x * dt
+        else:
+            self.integral_x *= 0.9  
+            
+        if abs(body_y) > 0:
+            self.integral_y += body_y * dt
+        else:
+            self.integral_y *= 0.9
+
+        # Anti-windup cap
+        max_integral = 0.2
+        self.integral_x = max(min(self.integral_x, max_integral), -max_integral)
+        self.integral_y = max(min(self.integral_y, max_integral), -max_integral)
+
+        # --- 5. Vertical Target ---
+        TARGET_Z = 0.0  # Kept at 0.0 so error remains high all the way to the floor
         error_z = body_z - TARGET_Z
 
-        vx = Kp_xy * body_x
-        vy = Kp_xy * body_y
-        vz = 0 if abs(error_z) < 0.15 else Kp_z * error_z
+        # --- 6. Final Velocity Math (P + I + D) ---
+        vx = (current_kp_xy * body_x) + (Ki_xy * self.integral_x) + (Kd_xy * derivative_x)
+        vy = (current_kp_xy * body_y) + (Ki_xy * self.integral_y) + (Kd_xy * derivative_y)
+        vz = 0 if abs(error_z) < 0.05 else Kp_z * error_z
 
-        # slow down near landing
-        if body_z < 0.5:
-            vx *= 0.5
-            vy *= 0.5
+        # --- 7. Anti-Ground Effect Override ---
+        # If attempting to descend, force a minimum downward speed of 0.15 m/s
+        if vz > 0:
+            vz = max(vz, 0.15)
 
-        # Clip velocities
-        vx = max(min(vx, MAX_VELOCITY), -MAX_VELOCITY)
-        vy = max(min(vy, MAX_VELOCITY), -MAX_VELOCITY)
-        vz = max(min(vz, MAX_VELOCITY), -MAX_VELOCITY)
+        # --- 8. Safety Clipping ---
+        vx = max(min(vx, current_max_vel), -current_max_vel)
+        vy = max(min(vy, current_max_vel), -current_max_vel)
+        vz = max(min(vz, current_max_vel), -current_max_vel)
+
+        # --- 9. Save State & Execute ---
+        self.last_vx = vx
+        self.last_vy = vy
 
         self.send_velocity(vx, vy, vz)
