@@ -1,18 +1,7 @@
-"""
-lawnmower.py
+''' Lawnmower path planning'''
 
-    planner="grid"  → plain boustrophedon order, no optimisation, no replan
-    planner="sa"    → SA-optimised order (pre-flight) + mid-flight replan
-                      (all SA math lives in simulated_annealing.py)
-
-This separation lets you A/B test the two strategies with the same flight
-code. SA logic is intentionally NOT in this file — see simulated_annealing.py.
-
-Field coordinate system:
-    Origin (0, 0) = drone launch point
-    North (+X NED) = forward from launch heading
-    East  (+Y NED) = right from launch heading
-"""
+# planner="grid"  → plain  order, no optimzation, no replan
+# planner="sa"    → Simulated annealing optimized order (pre-flight) &  mid-flight replan
 
 import math
 import time
@@ -23,23 +12,21 @@ from pymavlink import mavutil
 
 from core.log import get_logger
 from landing.pixhawk_controller.stationary_landing_controller import StationaryLandingController
-
-# SA planner — only used when planner="sa"
 from path_planning.simulated_annealing import build_sa_waypoints, replan_remaining
 
 logger = get_logger(__name__)
 
 
 FIELD_CONFIG = {
-    "north_min_m":  0.0,
-    "north_max_m":  5.0,
-    "east_min_m":   0.0,
-    "east_max_m":   5.0,
+    "north_min_m": 0.0,
+    "north_max_m": 8.0,
+    "east_min_m": 0.0,
+    "east_max_m": 8.0,
     "search_alt_m": 3.0,
     "confirm_alt_m": 1.2,
     "wp_accept_radius_m": 0.4,
-    "wp_timeout_s":       20.0,
-    "move_speed_ms":       1.2,
+    "wp_timeout_s": 20.0,
+    "move_speed_ms": 1.2,
 }
 
 LAWNMOWER_CONFIG = {
@@ -91,13 +78,7 @@ def send_goto_ned(master, north: float, east: float, down: float):
 
 
 def build_lawnmower_waypoints(cfg: dict, lm_cfg: dict) -> list:
-    """
-    Generate the base boustrophedon grid waypoints.
-    Returns list of (north, east) tuples in raw sweep order.
-
-    This is the "grid" planner output. The "sa" planner takes this list
-    and reorders it via simulated_annealing.build_sa_waypoints().
-    """
+    """ Generates grid waypoints, returns list of (north, east) tuples in raw sweep order. """
     waypoints   = []
     col_spacing = lm_cfg["col_spacing_m"]
     row_spacing = lm_cfg["row_spacing_m"]
@@ -131,11 +112,7 @@ def build_lawnmower_waypoints(cfg: dict, lm_cfg: dict) -> list:
     return waypoints
 
 
-def navigate_to(master, vo, cfg: dict,
-                north: float, east: float, down: float,
-                label: str,
-                marker_confirmed,
-                stop_event: threading.Event) -> bool:
+def navigate_to(master, vo, cfg: dict, north: float, east: float, down: float, label: str, marker_confirmed, stop_event: threading.Event) -> bool:
     """
     Fly to NED position, block until arrival or timeout.
 
@@ -260,9 +237,7 @@ def run_flight_loop(master, vo, cfg: dict, waypoints: list,  controller: Station
             )
             break
 
-        # --------------------------------------------------------------
-        # SA REPLAN (only in sa mode, only once)
-        # --------------------------------------------------------------
+        # only in simulated annealing mode
         if use_sa and not replan_done and uncertain_pos[2] == 1.0:
             detection_pos = (uncertain_pos[0], uncertain_pos[1])
             current_pos   = vo_north_east(vo)
@@ -299,7 +274,7 @@ def run_flight_loop(master, vo, cfg: dict, waypoints: list,  controller: Station
 
         idx += 1
 
-    # Marker confirmed during sweep — fly to it and land
+    # Marker confirmed during sweep, fly to it and land
     if marker_confirmed.is_set() and not stop_event.is_set():
         snap_north, snap_east = vo_north_east(vo)
         logger.info(
@@ -322,20 +297,9 @@ def run_flight_loop(master, vo, cfg: dict, waypoints: list,  controller: Station
         stop_event.set()
 
 
-def start_lawnmower_search(mav_master, vo,
-                            valid_ids: list,
-                            marker_confirmed,
-                            uncertain_pos,
-                            controller: StationaryLandingController,
-                            planner: str = "grid",
-                            field_cfg: dict = None,
-                            lm_cfg: dict = None,
-                            on_confirmed=None) -> dict:
+def start_lawnmower_search(mav_master, vo, valid_ids: list,  marker_confirmed, uncertain_pos, controller: StationaryLandingController,
+                            planner: str = "grid",  field_cfg: dict = None, lm_cfg: dict = None,  on_confirmed=None) -> dict:
     """
-    Launch lawnmower search in a background thread. Non-blocking.
-
-    planner : "grid" (plain sweep) or "sa" (SA-optimised + replan)
-
     Returns mission_state dict the caller can poll.
     """
     cfg = field_cfg or FIELD_CONFIG
@@ -386,21 +350,10 @@ def start_lawnmower_search(mav_master, vo,
     return mission_state
 
 
-def run_lawnmower_mission(mav_master, vo,
-                           valid_ids: list,
-                           marker_confirmed,
-                           uncertain_pos,
-                           controller: StationaryLandingController,
-                           planner: str = "grid",
-                           field_cfg: dict = None,
-                           lm_cfg: dict = None,
-                           on_confirmed=None) -> dict:
-    """
-    Blocking version of start_lawnmower_search.
-
-    planner : "grid" or "sa"
-
-    Blocks until marker confirmed and landed, or field exhausted.
+def run_lawnmower_mission(mav_master, vo,  valid_ids: list, marker_confirmed, uncertain_pos, controller: StationaryLandingController,
+                           planner: str = "grid", field_cfg: dict = None, lm_cfg: dict = None,  on_confirmed=None) -> dict:
+    """ Blocking version of start_lawnmower_search, for planner : "grid" or "sa"
+     Blocks until marker confirmed and landed, or field exhausted.
     """
     mission_state = start_lawnmower_search(
         mav_master, vo,
