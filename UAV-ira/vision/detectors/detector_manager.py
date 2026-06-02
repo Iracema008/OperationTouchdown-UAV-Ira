@@ -3,8 +3,9 @@
 from types import SimpleNamespace
 
 from core.log import get_logger
-from vision.common.detectors.detector import Detector
-from vision.common.detectors.available_detectors import AvailableDetectors
+from vision.detectors.detector import Detector
+from vision.detectors.available_detectors import AvailableDetectors
+
 logger = get_logger(__name__)
 
 

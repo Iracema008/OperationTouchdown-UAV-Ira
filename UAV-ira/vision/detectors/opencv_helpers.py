@@ -3,7 +3,7 @@
 import cv2
 import numpy as np
 
-from vision.common.detectors.detector import Detector
+from vision.detectors.detector import Detector
 from core.log import get_logger
 
 logger = get_logger(__name__)

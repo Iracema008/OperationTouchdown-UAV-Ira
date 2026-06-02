@@ -7,7 +7,7 @@ Not sure if we should try Yolo later on, but for now we can just use the built i
 
 from enum import Enum
 
-from vision.common.detectors.opencv_helpers import Cv2Detector
+from vision.detectors.opencv_helpers import Cv2Detector
 #from common.detectors.yolov3_tiny import YoloDetector
 
 
