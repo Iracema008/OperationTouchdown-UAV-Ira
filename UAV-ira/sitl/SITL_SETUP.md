@@ -1,50 +1,52 @@
 # SITL Setup Guide — UAV-ira
 
-Software In The Loop (SITL) lets us test the full UAV pipeline without flying. With ArduPilot running, simulating a virtual drone, the OAK-D S2 camera provides real VO, and QGroundControl lets us watch the mission execute on a satellite map view.
+Software In The Loop (SITL) lets you test the full mission pipeline without flying. ArduPilot simulates a virtual drone, and the mission process arms, sweeps, and lands against real MAVLink — no camera or Pixhawk required.
 
 ---
 
 ## What you need
 
-- Mac with Intel chip (Apple Silicon works too, but needs Rosetta for some steps)
-- OAK-D S2 camera (since our camera is bolted in, get a long usb-c to connect to your laptop)
-- QGroundControl installed (download at https://qgroundcontrol.com)
-- Python 3.10 or 3.11
-- Activatedt venv (`rtx_venv`)
+- Mac (Intel or Apple Silicon)
+- Python 3.11
+- Activated virtual environment (`rtx_venv`)
+- ArduPilot + MAVProxy installed
+- QGroundControl (optional, for watching the mission on a map)
 
 ---
 
-## Part 1 — Install dependencies
-
-Open a terminal and run these one at a time:
-
-```bash
-brew install gcc python3 git cmake pkg-config opencv
-pip3 install pymavlink MAVProxy dronekit
-```
-
-Verify cmake installed correctly:
-```bash
-cmake --version
-# Should print: cmake version 4.x.x
-```
-
----
-
-## Part 2 — Clone and build ArduPilot
+## Part 1 — Install ArduPilot
 
 ```bash
 cd ~
 git clone https://github.com/ArduPilot/ardupilot.git
 cd ardupilot
 git submodule update --init --recursive
+Tools/environment_install/install-prereqs-mac.sh -y
+source ~/.zshrc
 ```
 
-The submodule step downloads many files. It will take a while; just wait until it returns to the prompt.
+The submodule step downloads many files and will take a while. Just wait until it returns to the prompt.
 
-Run the ArduPilot setup script:
+Install MAVProxy:
+
 ```bash
-Tools/environment_install/install-prereqs-mac.sh -y
+pip install MAVProxy
+```
+
+---
+
+## Part 2 — Set PYTHONPATH
+
+Every terminal you open for SITL testing needs this set:
+
+```bash
+export PYTHONPATH=/Users/sema/Documents/OperationTouchdown/UAV-ira
+```
+
+Add it to `~/.zshrc` to make it permanent:
+
+```bash
+echo 'export PYTHONPATH=/Users/sema/Documents/OperationTouchdown/UAV-ira' >> ~/.zshrc
 source ~/.zshrc
 ```
 
@@ -52,243 +54,165 @@ source ~/.zshrc
 
 ## Part 3 — Launch SITL
 
-Replace the coordinates with an actual field location.
+Replace the coordinates with your actual field location. The final `0` is the launch heading in degrees — 0 means facing North. The mission assumes a north-facing launch.
 
 ```bash
 cd ~/ardupilot
 sim_vehicle.py -v ArduCopter --console \
-  --custom-location=YOUR_LAT,YOUR_LON,ALTITUDE,0 \
-  --out=127.0.0.1:14550 \
-  --out=127.0.0.1:14551 \
-  --out=127.0.0.1:14552
+  --custom-location=34.10468,-118.31910,50,0
 ```
-
-For instance:
-```bash
-sim_vehicle.py -v ArduCopter --console \
-  --custom-location=34.10468, -118.31910,50,0 \
-  --out=127.0.0.1:14550 \
-  --out=127.0.0.1:14551 \
-  --out=127.0.0.1:14552
-```
-
-The last `0` is the launch heading in degrees — 0 means facing North. This is important because the  mission assumes a NORTH FACING launch.
 
 Wait for the MAVProxy console to show:
+
 ```
 STABILIZE>
 ```
 
 ---
 
-## Part 4 — Configure ArduPilot Parameters
+## Part 4 — Configure ArduPilot parameters
 
-In the MAVProxy console (`STABILIZE>`) type each of these and press Enter after each one:
+In the MAVProxy console type each of these and press Enter after each one:
 
 ```
-param set GPS1_TYPE 0
-param set ARMING_OPTIONS 0
-param set VISO_TYPE 1
-param set EK3_SRC1_POSXY 6
-param set EK3_SRC1_VELXY 6
+param set VISO_TYPE 0
+param set EK3_SRC1_POSXY 3
+param set EK3_SRC1_VELXY 3
 param set EK3_SRC1_POSZ 1
-param set EK3_SRC1_VELZ 0
-param set EK3_SRC1_YAW 6
-param set SIM_GPS1_ENABLE 0
+param set ARMING_CHECK 0
 ```
 
-Verify they saved correctly:
+What these do:
+
+- `VISO_TYPE 0` — disables the visual odometry requirement. VIO only runs on the Pi, not your Mac.
+- `EK3_SRC1_POSXY 3` — tells the EKF to use simulated GPS for horizontal position instead of VIO.
+- `EK3_SRC1_VELXY 3` — same for velocity.
+- `EK3_SRC1_POSZ 1` — use barometer for altitude.
+- `ARMING_CHECK 0` — disables pre-arm checks so the drone arms without sensors that aren't present on your Mac.
+
+Save the parameters so you don't have to retype them next session:
+
 ```
-param show GPS1_TYPE
-param show VISO_TYPE
-param show EK3_SRC1_POSXY
-param show SIM_GPS1_ENABLE
+param save sitl_params.parm
 ```
 
-Expected output:
+Load them next time with:
+
 ```
-GPS1_TYPE        0.0
-VISO_TYPE        1.0
-EK3_SRC1_POSXY   6.0
-SIM_GPS1_ENABLE  0.0
+param load sitl_params.parm
 ```
 
-Save and reboot:
-```
-param save mav.parm
-reboot
-```
-
-Wait for `STABILIZE>` to come back after reboot — about 30 seconds.
+Wait until the console shows `pre-arm good` before running the mission script.
 
 ---
 
-## Part 5 — Open a second terminal. This connects the real OAK-D S2 camera to SITL:
+## Part 5 — Run the mission
+
+Open a second terminal and activate your environment:
 
 ```bash
-cd ~/path/to/UAV-ira
-PYTHONPATH=. python3 sitl/sitl_vo_bridge.py
+cd /Users/sema/Documents/OperationTouchdown/UAV-ira
+source rtx_venv/bin/activate
 ```
 
-**Important — point the OAK-D S2 camera at a textured surface** before running this. A keyboard, printed page, or any surface with detail works. The camera needs visual features to track position (Ex: camera calibration squares).
+Run the grid lawnmower:
 
-Wait for this output:
-```
-[SITLBridge] Heartbeat OK — streaming at 30.0 Hz.
-[SITLBridge] Vision stream thread started.
-[SITLBridge] Yaw aligned. offset=+X.XX°
-[SITLBridge] N=+0.00 E=+0.00 D=+0.00 yaw=+0.0° | msgs=150
-```
-
-The `Yaw aligned` line is the key — it means ArduPilot has accepted the VO feed.
-
-**Do not move on until you see `Yaw aligned`.**
-
----
-
-## Part 6 — Connect QGroundControl
-
-Open QGroundControl. It should connect automatically on UDP port 14550.
-
-You should see:
-- The virtual drone on the map at your field coordinates
-- No red warning icons
-- Status showing **Ready to Fly**
-
-If QGC still shows `PreArm: VisOdom: not healthy` it means the bridge isn't streaming yet — go back to Part 5 and make sure `Yaw aligned` appeared.
-
----
-
-## Part 7 — Arm and Run The Mission
-
-**In Terminal 1 (MAVProxy):**
-```
-mode guided
-arm throttle
-takeoff 2
-```
-
-Watch QGC — the virtual drone lifts off to 2 meters.
-
-**In Terminal 3 (new terminal):**
 ```bash
-cd ~/path/to/UAV-ira
-PYTHONPATH=. python3 - <<'EOF'
-import sys, os, time, math
-sys.path.insert(0, os.getcwd())
-from pymavlink import mavutil
-
-master = mavutil.mavlink_connection('udpout:127.0.0.1:14552')
-master.wait_heartbeat()
-print('Connected to SITL')
-
-def generate_waypoints():
-    wps = []
-    alt = -2.0
-    right = 0.0
-    direction = 1
-    while right <= 8.0 + 1e-6:
-        n_near = 0.0 if direction == 1 else 8.0
-        n_far  = 8.0 if direction == 1 else 0.0
-        wps.append((n_near, right, alt))
-        wps.append((n_far,  right, alt))
-        right += 1.0
-        direction *= -1
-    return wps
-
-def goto_ned(master, north, east, down):
-    type_mask = (
-        mavutil.mavlink.POSITION_TARGET_TYPEMASK_VX_IGNORE |
-        mavutil.mavlink.POSITION_TARGET_TYPEMASK_VY_IGNORE |
-        mavutil.mavlink.POSITION_TARGET_TYPEMASK_VZ_IGNORE |
-        mavutil.mavlink.POSITION_TARGET_TYPEMASK_AX_IGNORE |
-        mavutil.mavlink.POSITION_TARGET_TYPEMASK_AY_IGNORE |
-        mavutil.mavlink.POSITION_TARGET_TYPEMASK_AZ_IGNORE |
-        mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE |
-        mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
-    )
-    master.mav.set_position_target_local_ned_send(
-        0, master.target_system, master.target_component,
-        mavutil.mavlink.MAV_FRAME_LOCAL_NED,
-        type_mask, north, east, down,
-        0, 0, 0, 0, 0, 0, 0, 0
-    )
-
-waypoints = generate_waypoints()
-print(f'Running lawnmower — {len(waypoints)} waypoints')
-
-for i, wp in enumerate(waypoints):
-    print(f'WP {i:02d}/{len(waypoints)-1}: N={wp[0]:.1f} E={wp[1]:.1f} D={wp[2]:.1f}')
-    t_start = time.time()
-    while time.time() - t_start < 8.0:
-        goto_ned(master, *wp)
-        msg = master.recv_match(type='LOCAL_POSITION_NED', blocking=True, timeout=1)
-        if msg:
-            dist = math.sqrt((msg.x - wp[0])**2 + (msg.y - wp[1])**2)
-            print(f'  pos: N={msg.x:+.2f} E={msg.y:+.2f} dist={dist:.2f}m', end='\r')
-            if dist < 0.5:
-                print(f'\n  Arrived at WP {i}')
-                break
-        time.sleep(0.2)
-
-print('\nMission complete!')
-EOF
+python sitl/run_sitl.py --planner grid
 ```
 
-Watch the QGC map — the virtual drone traces the lawnmower pattern over your field.
+Run the simulated annealing lawnmower:
+
+```bash
+python sitl/run_sitl.py --planner sa
+```
+
+The mission process arms the drone, takes off to 3m, and begins the sweep. Position is read directly from SITL's `LOCAL_POSITION_NED` messages — no VIO or camera required.
+
+Press Enter at any point to simulate `marker_confirmed` and test the approach and landing sequence.
 
 ---
 
-## Terminal layout summary
+## What you will see
 
-| Terminal | What runs | Notes |
-|---|---|---|
-| 1 | `sim_vehicle.py` — SITL + MAVProxy | Never close this (or else) |
-| 2 | `sitl_vo_bridge.py` — VO + ArUco | Keep OAK-D S2 pointed at a textured surface |
-| 3 | Mission script | Can now restart freely |
-| QGC | QGroundControl | Opens automatically |
+Grid planner startup:
+
+```
+[GRID] === PLANNED PATH ===
+[GRID]   WP  1/20 → N=0.0 E=0.0
+[GRID]   WP  2/20 → N=2.0 E=0.0
+...
+[GRID] Sweep starting — 20 waypoints, dwell=3.0s each
+```
+
+SA planner startup (runs optimisation before arming):
+
+```
+[SA] Running pre-flight path optimisation...
+[SA] 20 waypoints — 38.4m → 31.2m over 85 steps
+[SA] === OPTIMISED PATH ===
+[SA]   WP  1/20 → N=0.0 E=0.0
+[SA]   WP  2/20 → N=8.0 E=5.6
+...
+```
+
+On each waypoint departure:
+
+```
+[GRID] Departing WP 3/20 | from N=0.02 E=0.00 | to N=4.0 E=0.0 | dist to next=4.00m
+```
+
+Waypoints will all time out and advance on a fixed dwell timer — this is expected. SITL has no physics simulation of the drone actually moving, so position stays near the origin. The dwell timer advances waypoints regardless. This is correct for testing path logic and MAVLink commands.
+
+---
+
+## Terminal layout
+
+| Terminal | What runs |
+|---|---|
+| 1 | `sim_vehicle.py` — SITL + MAVProxy. Never close this during a test. |
+| 2 | `run_sitl.py` — mission script. Can be restarted freely. |
+
+QGroundControl can be open at the same time and will connect automatically on UDP port 14550.
 
 ---
 
 ## Troubleshooting
 
 **`PreArm: VisOdom: not healthy`**
-The bridge isn't running or VO hasn't reached TRACKING status. Make sure the OAK-D is pointed at a textured surface and `Yaw aligned` has appeared in Terminal 2.
+Run the parameter set commands from Part 4. This means ArduPilot is waiting for VIO input that only exists on the Pi.
 
-**`Unable to find parameter 'GPS_TYPE'`**
-You're on ArduPilot v4.8+. Use `GPS1_TYPE` instead.
+**`PreArm: AHRS: waiting for home`**
+The simulated GPS hasn't locked yet. Wait 15-20 seconds after `pre-arm good` appears before running the mission script.
 
-**`X_LINK_INSUFFICIENT_PERMISSIONS`**
-The OAK-D is locked from a previous crashed session. Unplug, wait 5 seconds, replug.
-
-**`X_LINK_ERROR` / USB disconnect**
-Cable quality issue. Use a short thick USB 3.0 cable and try the other Thunderbolt port on your Mac.
-
-**Bridge connects but `Yaw aligned` never appears**
-VO is stuck in WARMUP. Point the camera at a surface with more texture and depth variation — a keyboard works better than a flat printed page. Hold the camera 40-50cm above the surface.
-
-**`inliers=0` in the camera window**
-Stereo depth isn't working for the current surface. Move the camera closer (minimum 20cm, optimal 40-80cm) or point at a scene with objects at different depths.
-
-**Mission script hangs on `wait_heartbeat`**
-Port 14552 isn't open. Make sure you started SITL with all three `--out` flags as shown in Part 3.
-
----
-
-## ArUco marker detection
-
-While the bridge is running, the system automatically detects ArUco markers (DICT_6X6_250) from the OAK-D S2 RGB camera.
-
-**Valid marker IDs** are set in `sitl/sitl_vo_bridge.py`:
-```python
-TARGET_IDS = [3, 7]
+**`Address already in use` on port 14550**
+A previous run left the port open. Find and kill it:
+```bash
+lsof -i udp:14550
+kill <PID>
 ```
 
-Edit this list based on which marker IDs is the target you've placed on your field.
+**`No module named 'core'`**
+PYTHONPATH is not set. Run:
+```bash
+export PYTHONPATH=/Users/sema/Documents/OperationTouchdown/UAV-ira
+```
 
-When a valid marker is detected:
-- Terminal 2 prints `[ArUco] Correct marker FOUND: [3]`
-- A grayscale image is saved to `saved-aruco/pack_image.png`
-- Invalid IDs are detected and drawn on screen but nothing is saved
+**`'PixhawkConfig' object has no attribute 'connection_string'`**
+Your local `core/config.py` uses a different field name. Check what the connection string field is called:
+```bash
+grep -n "connection\|serial\|port" core/config.py
+```
+Update `mission_grid.py` and `mission_sa.py` to match.
 
-To test detection, print an ArUco marker from https://chev.me/arucogen/ using Dictionary `6x6` and hold it in front of the camera while the bridge is running.
+**`Waiting for heartbeat` hangs forever**
+The mission is trying to connect on the wrong port. Make sure `connection_string` in `core/config.py` is set to:
+```
+udpin:0.0.0.0:14550
+```
+
+**`Failed to set ARMING_CHECK`**
+Non-critical. The drone still arms. Verify with `param show ARMING_CHECK` if needed.
+
+**Waypoints all timing out**
+Expected. See note above about SITL having no physics simulation.
