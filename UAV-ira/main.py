@@ -1,7 +1,12 @@
 ''' Main file to run entire UAV, now w/multiprocessing '''
 
+### just for testing search :
 # python main.py --mode scan --planner grid
 # python main.py --mode scan --planner sa
+
+### for challenge 1 and 2
+# python main.py --mode scan --planner c1
+# python main.py --mode scan --planner c2
 
 import time
 import argparse
@@ -20,31 +25,37 @@ from core.state import (
 )
 from core.config import load_config
 from core.log import get_logger
-
 from vio_slam.broadcaster import broadcaster
 from vio_slam.vio import run_vio_process
 from vio_slam.slam import run_slam_process
 from telemetry.telemetry_logger import telemetry_logger
-# mission module selected at runtime based on --planner flag
+# mission module is selected at runtime based on --planner flag
 
 logger = get_logger(__name__)
 
 
 def main():
     parser = argparse.ArgumentParser(description="UAV autonomous mission")
-    parser.add_argument("--mode",    choices=["scan", "land"], default="scan")
+    parser.add_argument("--mode", choices=["scan", "land"], default="scan")
     parser.add_argument(
-        "--planner", choices=["grid", "sa"], default="grid",
-        help="grid = plain lawnmower | sa = simulated annealing"
+        "--planner", choices=["grid", "sa", "c1", "c2"], default="grid",
+        help="grid = boustrophedon | sa = simulated annealing | c1 = challenge 1 | c2 = challenge 2"
     )
     args = parser.parse_args()
 
     cfg = load_config(mode=args.mode)
 
-    # Import the correct mission module based on planner flag
+    # 1. Import the correct mission module based on --planner flag.
+    #    This is done at runtime so we don't import all three every time.
     if args.planner == "sa":
         from mission.mission_sa import run_mission
         logger.info("[MAIN] Planner = SA (simulated annealing)")
+    elif args.planner == "c1":
+        from mission.challenge_one import run_mission
+        logger.info("[MAIN] Planner = C1 (challenge 1 — UGV landing)")
+    elif args.planner == "c2":
+        from mission.challenge_two import run_mission
+        logger.info("[MAIN] Planner = C2 (challenge 2 — ArUco search + UGV landing)")
     else:
         from mission.mission_grid import run_mission
         logger.info("[MAIN] Planner = GRID (boustrophedon)")
@@ -52,21 +63,23 @@ def main():
     logger.info(f"[MAIN] Mode={cfg.mode} | Planner={args.planner}")
     logger.info("[MAIN] Creating shared memory")
 
-    # creates ALL shared memory before spawning any process.
-    # vio, aruco, flight mode
+    # 2. Create ALL shared memory before spawning any process.
+    #    Child processes connect to existing blocks — they never create them.
+    #    state_dict — UAV state (uav_vio, uav_aruco, flight mode etc.)
+    #    vio_dict   — VIO pipeline (oak_rgb, oak_gray, oak_depth etc.)
     state_dict = create_shared_state()
-    # rgb,depth, mono
     vio_dict   = create_vio_pipeline_state(
         W=cfg.camera.width,
         H=cfg.camera.height,
     )
 
-    lock = state_dict["lock"]
+    lock             = state_dict["lock"]
     marker_confirmed = state_dict["marker_confirmed"]
-    ugv_signal = state_dict["ugv_signal"]
-    hover_reached = state_dict["hover_reached"]
+    ugv_signal       = state_dict["ugv_signal"]
+    hover_reached    = state_dict["hover_reached"]
 
-    # VIO pipeline mutexes, one per shared memory block
+    # One mutex per shared memory block — each process acquires the lock
+    # before reading or writing so frames are never half-written
     rgb_frame_mutex = vio_dict["rgb_frame_mutex"]
     gray_frame_mutex = vio_dict["gray_frame_mutex"]
     depth_frame_mutex = vio_dict["depth_frame_mutex"]
@@ -76,19 +89,23 @@ def main():
     slam_trigger_mutex = vio_dict["slam_trigger_mutex"]
     slam_enabled_mutex = vio_dict["slam_enabled_mutex"]
 
+    # Shared between mission (writes on uncertain detection) and
+    # mission SA planner (reads to reorder remaining waypoints)
+    # Layout: Array('d', [north, east, flag])
     uncertain_pos = Array('d', [0.0, 0.0, 0.0])
 
-    # Main process state accessor for monitoring loop
+    # Main process state accessor for the monitoring loop
     state = UAVStateAccessor(lock, marker_confirmed, ugv_signal, hover_reached)
 
-    # Flight log paths
     Path("flight_logs").mkdir(exist_ok=True)
     log_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     db_path = f"flight_logs/flight_{log_timestamp}.db"
 
     logger.info("[MAIN] Shared memory ready — spawning processes")
 
-    # Process 1: Broadcaster, writes camera frames and calibration
+    # 3. Process 1: Broadcaster — sole OAK-D owner, writes camera frames,
+    #    calibration, and attitude to shared memory. Must start first so VIO
+    #    and mission have valid frames to read.
     p_broadcaster = mp.Process(
         target=broadcaster,
         args=(
@@ -102,10 +119,12 @@ def main():
     )
     p_broadcaster.start()
     logger.info("[MAIN] broadcaster started — waiting 3s for camera boot")
-    # Camera needs ~3s to initialise before VIO can read valid frames
-    time.sleep(3)
+    time.sleep(3)   # camera needs ~3s to initialise before VIO reads frames
 
-    # Process 2: VIO, reads from shared memory, computes pose, writes to pose
+    # 4. Process 2: VIO — reads gray and depth from shared memory, computes
+    #    NED position via optical flow + PnP, sends vision_position_estimate
+    #    to Pixhawk via UART3, writes position to uav_vio for mission to read.
+    #    ArUco detection is NOT here — that is mission's responsibility.
     p_vio = mp.Process(
         target=run_vio_process,
         args=(
@@ -124,12 +143,10 @@ def main():
     )
     p_vio.start()
     logger.info("[MAIN] vio started — waiting 1s for calibration read")
-    # VIO reads calibration from shared memory at startup —
-    # give broadcaster time to write it first
-    time.sleep(1)
+    time.sleep(1)   # VIO reads calibration from shared memory at startup
 
-
-    # Process 3: SLAM, reads RGB from shared memory, finds loop closures, writes drift corrections
+    # 5. Process 3: SLAM — reads RGB from shared memory, finds loop closures,
+    #    writes drift corrections for VIO to apply on the next frame.
     p_slam = mp.Process(
         target=run_slam_process,
         args=(
@@ -146,7 +163,9 @@ def main():
     logger.info("[MAIN] slam started")
     time.sleep(0.5)
 
-    # Process 4: Mission, reads camera, pose from shared memory, runs aruco detection & path planning
+    # 6. Process 4: Mission — reads RGB and position from shared memory,
+    #    runs ArUco or AprilTag detection, executes path planning and landing.
+    #    Sole UART0 owner for arm → sweep → land.
     p_mission = mp.Process(
         target=run_mission,
         args=(
@@ -165,8 +184,8 @@ def main():
     p_mission.start()
     logger.info("[MAIN] mission started")
 
-
-    # Process 5: Telemetry, reads UAV state from shared memory, logs to SQLite database.
+    # 7. Process 5: Telemetry — reads UAV state from shared memory,
+    #    logs all flight data to a SQLite database for post-flight analysis.
     p_telemetry = mp.Process(
         target=telemetry_logger,
         args=(
@@ -181,23 +200,20 @@ def main():
     logger.info(f"[MAIN] telemetry started — logging to {db_path}")
 
     processes = [p_broadcaster, p_vio, p_slam, p_mission, p_telemetry]
-
     logger.info("[MAIN] All 5 processes running")
 
-
-    # Monitoring loop — runs until mission exits
+    # 8. Monitoring loop — prints status every second until mission exits.
+    #    Mission exiting is the signal to shut everything else down.
     try:
         while True:
             mode = state.get_flight_mode()
             (vio_x, vio_y, vio_z, _), vio_ts = state.get_vio_position()
             (_, marker_id) = state.get_aruco_pose()
 
-            vio_str    = (f"{vio_x:.2f},{vio_y:.2f},{vio_z:.2f}"
-                          if vio_ts > 0 else "None")
+            vio_str    = (f"{vio_x:.2f},{vio_y:.2f},{vio_z:.2f}" if vio_ts > 0 else "None")
             marker_str = f"ID:{marker_id}" if marker_id else "None"
             sa_str     = (
-                f"SA-replan fired at N={uncertain_pos[0]:.2f} "
-                f"E={uncertain_pos[1]:.2f}"
+                f"SA-replan fired at N={uncertain_pos[0]:.2f} E={uncertain_pos[1]:.2f}"
                 if uncertain_pos[2] == 1.0 else "SA-replan pending"
             )
 
@@ -208,7 +224,6 @@ def main():
                 f"{sa_str}"
             )
 
-            # Mission done — sweep complete or marker found and landed
             if not p_mission.is_alive():
                 logger.info("[MAIN] Mission finished — shutting down")
                 break
@@ -223,7 +238,6 @@ def main():
         for p in processes:
             if p.is_alive():
                 p.terminate()
-
         for p in processes:
             p.join(timeout=5)
             if p.is_alive():
@@ -233,12 +247,11 @@ def main():
         state.close()
         cleanup_shared_state(state_dict)
         cleanup_vio_pipeline_state(vio_dict)
-
         logger.info(f"[MAIN] Shutdown complete. Telemetry saved to {db_path}")
         logger.info("[MAIN] Done. Yabadabadoo!")
 
 
 if __name__ == "__main__":
-    # spawn is mandatory on Pi, fork breaks DepthAI and OpenCV
+    # spawn is mandatory on Pi — fork breaks DepthAI and OpenCV
     mp.set_start_method('spawn', force=True)
     main()
