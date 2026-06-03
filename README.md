@@ -93,13 +93,13 @@ export PIXHAWK_PORT=/dev/ttyUSB0
 
 ## Mission Planners
 
-**grid** — plain boustrophedon column search. Visits waypoints in fixed left-to-right alternating up-down order. Simple and predictable.
+**grid** — plain lawnmower column search. Visits waypoints in fixed left-to-right alternating up-down order. Simple and predictable.
 
-**sa** — simulated annealing optimized search. Runs once before arming and reorders the same grid waypoints into the shortest total path. On an 8x8m field SA typically saves 10-25% path distance over grid. Full optimized path is printed to logs before takeoff.
+**sa** — simulated annealing optimized search. Runs once before arming and reorders the same grid waypoints into the shortest total path. On an 8x8m field, SA typically saves 10-25% path distance over grid. The fully optimized path is printed to logs before takeoff.
 
-**c1** — Challenge 1. Takes off from stationary UGV, flies forward until AprilTag on UGV is detected, lands on moving UGV, disarms, waits 30 seconds.
+**c1** — Challenge 1. Takes off from a stationary UGV, flies forward until the AprilTag on the UGV is detected, lands on a moving UGV, disarms, waits 30 seconds.
 
-**c2** — Challenge 2. Takes off, runs grid search to find ArUco marker, sends NED coordinates to UGV over LoRa, returns to start, detects AprilTag on moving UGV, lands, waits 10 seconds.
+**c2** — Challenge 2. Takes off, runs a grid search to find an ArUco marker, sends NED coordinates to the UGV over LoRa, returns to the start, detects an AprilTag on a moving UGV, lands, waits 10 seconds.
 
 ---
 
@@ -174,7 +174,7 @@ Five processes run in parallel during a real flight. Each owns exactly one hardw
 | mission | mission/*.py | UART0 | ArUco/AprilTag detection, path planning, landing |
 | telemetry | telemetry/telemetry_logger.py | — | Logs flight data to SQLite |
 
-SITL runs only the mission process. Broadcaster, VIO, and SLAM are skipped since there is no Pixhawk or OAK-D on your Mac.
+SITL runs only the mission process. Broadcaster, VIO, and SLAM are skipped since there is no Pixhawk or OAK-D S2 on our laptops.
 
 ---
 
@@ -198,8 +198,8 @@ position     [north, east, down]                   VIO writes, SLAM reads
 ## Hardware Requirements
 
 - OAK-D S2 camera (DepthAI v3)
-- Pixhawk flight controller (ArduCopter firmware)
-- Raspberry Pi 4 (4GB or 8GB)
+- Pixhawk flight controller (ArduPilot/ArduCopter firmware)
+- Raspberry Pi 5 (8GB)
 - SB Components 915MHz USB LoRa dongle (for UGV communication)
 - Long USB-C cable (for bench testing with camera bolted to drone)
 
