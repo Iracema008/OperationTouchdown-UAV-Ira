@@ -67,8 +67,8 @@ class AprilTagConfig:
 @dataclass
 class PixhawkConfig:
     # comment out udp for sitl, keep serial0 for flight
-    connection_string: str =  "udp:0.0.0.0:14550"
-    #connection_string: str = "/dev/serial0"
+    #connection_string: str =  "udp:0.0.0.0:14550"
+    connection_string: str = "/dev/serial0"
     baud_rate: int = 57600
     hover_altitude_m: float = 3.0
     land_speed_ms: float = 0.3
