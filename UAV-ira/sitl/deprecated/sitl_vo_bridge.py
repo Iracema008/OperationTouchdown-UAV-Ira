@@ -48,7 +48,7 @@ def run_sitl_bridge(lock, marker_confirmed, ugv_signal, hover_reached, cfg):
         msg = master.recv_match(blocking=True, timeout=1.0)
         if msg:
             logger.info(f"[SITL BRIDGE] Got msg type: {msg.get_type()}")
-            
+
     #logger.info("[SITL BRIDGE] Requested LOCAL_POSITION_NED at 10Hz")
 
     try:

@@ -46,9 +46,9 @@ logger = get_logger(__name__)
 
 FIELD_CONFIG = {
     "north_min_m": 0.0,
-    "north_max_m": 8.0,
+    "north_max_m": 9.2,
     "east_min_m": 0.0,
-    "east_max_m": 8.0,
+    "east_max_m": 9.2,
     "search_alt_m": 3.0,
     "confirm_alt_m": 1.2,
     "wp_accept_radius_m": 0.4,
@@ -132,9 +132,7 @@ def save_snapshot(frame, corners, ids, marker_id, log_timestamp, suffix=""):
     logger.info(f"[SA] Snapshot → {filename}")
 
 
-def run_mission(lock, marker_confirmed, ugv_signal, hover_reached,
-                cfg, log_timestamp, uncertain_pos, planner,
-                rgb_frame_mutex):
+def run_mission(lock, marker_confirmed, ugv_signal, hover_reached, cfg, log_timestamp, uncertain_pos, planner, rgb_frame_mutex):
     """
     SA lawnmower mission process.
 
@@ -201,8 +199,8 @@ def run_mission(lock, marker_confirmed, ugv_signal, hover_reached,
     if not isinstance(target_ids, list):
         target_ids = [target_ids]
 
-    detector      = DetectorManager(cfg.detector).get_detector()
-    transformer   = CameraCoordinateTransformer(cfg.video)
+    detector = DetectorManager(cfg.detector).get_detector()
+    transformer = CameraCoordinateTransformer(cfg.video)
     consec_counts = {}
 
     # states
@@ -224,7 +222,7 @@ def run_mission(lock, marker_confirmed, ugv_signal, hover_reached,
         while phase != "done":
             t_start = time.time()
 
-            # ---- 1. Position ----
+            # 1. Position 
             if sitl_mode:
                 pos_msg = controller.master.recv_match(
                     type='LOCAL_POSITION_NED', blocking=False
@@ -244,12 +242,12 @@ def run_mission(lock, marker_confirmed, ugv_signal, hover_reached,
                 cur_north = vio_x
                 cur_east  = vio_y
 
-            # ---- 2. RGB frame ----
+            #  2. RGB frame 
             if not sitl_mode and shared_rgb is not None:
                 with rgb_frame_mutex:
                     np.copyto(local_rgb, shared_rgb)
 
-            # ---- 3. ArUco detection ----
+            #  3. ArUco detection 
             if not sitl_mode and not marker_confirmed.is_set():
                 corners, ids, _ = detector.detect(local_rgb)
 
@@ -292,7 +290,7 @@ def run_mission(lock, marker_confirmed, ugv_signal, hover_reached,
                             approach_start = time.time()
                             phase = "approach"
 
-            # ---- 4. Phase execution ----
+            #  4. Phase execution
             if phase == "sweep":
                 if wp_idx < total:
                     tgt_n, tgt_e = waypoints[wp_idx]
@@ -324,7 +322,7 @@ def run_mission(lock, marker_confirmed, ugv_signal, hover_reached,
                                 f"dist from target={dist_from_target:.2f}m"
                             )
 
-                        wp_idx    += 1
+                        wp_idx += 1
                         wp_start_t = time.time()
                 else:
                     logger.info("[SA] Sweep complete — marker not found")
@@ -359,7 +357,7 @@ def run_mission(lock, marker_confirmed, ugv_signal, hover_reached,
                 state.set_flight_mode(FlightMode.LAND)
                 phase = "done"
 
-            # ---- 5. Loop timing ----
+            #  5. Loop timing
             elapsed_s = time.time() - t_start
             time.sleep(max(0.0, LOOP_PERIOD - elapsed_s))
 

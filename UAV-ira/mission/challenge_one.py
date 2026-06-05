@@ -27,7 +27,7 @@ FORWARD_SPEED_MS = 0.5  # m/s in body frame, heading at takeoff does not matter
 # AprilTag detection
 # switched to a smaller 5.5 by 5.5 aruco marker
 TARGET_TAG_ID = 67
-TAG_SIZE_M = 0.14
+TAG_SIZE_M = 0.20
 
 # Tag tracking and landing
 LANDING_THRESHOLD_M = 0.4   # z distance to UGV surface before touchdown

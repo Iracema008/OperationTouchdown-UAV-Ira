@@ -13,17 +13,18 @@ from core.log import get_logger
 from landing.pixhawk_controller.stationary_landing_controller import StationaryLandingController
 from vision.detectors.detector_manager import DetectorManager
 from vision.video.camera_coordinate_transformer import CameraCoordinateTransformer
+from telemetry.telemetry_logger import log_event
 
 logger = get_logger(__name__)
 
 FIELD_CONFIG = {
     "north_min_m": 0.0,
-    "north_max_m": 8.0,
+    "north_max_m": 9.2,
     "east_min_m": 0.0,
-    "east_max_m": 8.0,
+    "east_max_m": 9.2,
     "search_alt_m": 3.0,
     "confirm_alt_m": 1.2,
-    "wp_accept_radius_m": 0.4,
+    "wp_accept_radius_m": 0.4, # meters from waypoint to consider it reached
     "wp_dwell_s": 3.0,  # seconds at each waypoint before continuing
     "approach_timeout_s": 15.0,
 }
@@ -45,6 +46,8 @@ def dist2d(a: tuple, b: tuple) -> float:
 
 def send_goto_ned(master, north: float, east: float, down: float):
     """Send NED position setpoint — returns immediately (non-blocking)."""
+    # non blocking means we have to resend the same setpoint until we reach it,
+    # otherwise Pixhawk will time out and switch back to loiter
     type_mask = (
         mavutil.mavlink.POSITION_TARGET_TYPEMASK_VX_IGNORE |
         mavutil.mavlink.POSITION_TARGET_TYPEMASK_VY_IGNORE |
@@ -129,17 +132,20 @@ def run_mission(lock, marker_confirmed, ugv_signal, hover_reached, cfg, log_time
     controller.arm_motors()
     controller.takeoff_to_altitude(cfg.pixhawk.hover_altitude_m)
     state.set_flight_mode(FlightMode.SCAN)
+    
+    takeoff_start = time.time()
+    #log_event(csv_path, "uav_start")
     logger.info("[GRID] Airborne — starting mission loop")
 
     # check if we are in simulated mode, check for connection string udp in core/config
     sitl_mode  = not cfg.pixhawk.connection_string.startswith("/dev")
-    shm_rgb    = None
+    shm_rgb = None
     shared_rgb = None
     local_rgb  = np.zeros((H, W, 3), dtype=np.uint8)
 
     if not sitl_mode:
         try:
-            shm_rgb    = shared_memory.SharedMemory(name="oak_rgb")
+            shm_rgb = shared_memory.SharedMemory(name="oak_rgb")
             shared_rgb = np.ndarray((H, W, 3), dtype=np.uint8, buffer=shm_rgb.buf)
         except Exception as e:
             logger.warning(f"[GRID] oak_rgb unavailable: {e} — ArUco disabled")
@@ -159,7 +165,7 @@ def run_mission(lock, marker_confirmed, ugv_signal, hover_reached, cfg, log_time
     if not isinstance(target_ids, list):
         target_ids = [target_ids]
 
-    detector    = DetectorManager(cfg.detector).get_detector()
+    detector= DetectorManager(cfg.detector).get_detector()
     transformer = CameraCoordinateTransformer(cfg.video)
     consec_counts = {}
 
@@ -182,7 +188,7 @@ def run_mission(lock, marker_confirmed, ugv_signal, hover_reached, cfg, log_time
         logger.info(f"[GRID]   WP {i + 1:>2}/{total} → N={n:.1f} E={e:.1f}")
     logger.info("[GRID] === END PATH ===")
     logger.info(
-        f"[GRID] Sweep starting — {total} waypoints, "
+        f"[GRID] Search starting — {total} waypoints, "
         f"dwell={FIELD_CONFIG['wp_dwell_s']}s each, "
         f"target IDs={target_ids}"
     )
@@ -239,6 +245,13 @@ def run_mission(lock, marker_confirmed, ugv_signal, hover_reached, cfg, log_time
                         )
 
                         if count >= CONFIRM_THRESHOLD:
+                            total_flight_time = time.time() - takeoff_start
+                            if total_flight_time < 5.0:
+                                 logger.info(
+                                    f"[GRID] Marker confirmed but min flight time not met "
+                                    f"({total_flight_time:.1f}s / 5.0s) — continuing search"
+                                )
+                                 continue
                             cx = (corners[0][0][0][0] +
                                   (corners[0][0][2][0] - corners[0][0][0][0]) / 2)
                             cy = (corners[0][0][0][1] +

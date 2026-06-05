@@ -143,7 +143,7 @@ def main():
     )
     p_vio.start()
     logger.info("[MAIN] vio started — waiting 1s for calibration read")
-    time.sleep(3)   # VIO reads calibration from shared memory at startup
+    time.sleep(1)   # VIO reads calibration from shared memory at startup
 
     # 5. Process 3: SLAM — reads RGB from shared memory, finds loop closures,
     #    writes drift corrections for VIO to apply on the next frame.
@@ -161,7 +161,7 @@ def main():
     )
     p_slam.start()
     logger.info("[MAIN] slam started")
-    time.sleep(1)
+    time.sleep(0.5)
 
     # 6. Process 4: Mission — reads RGB and position from shared memory,
     #    runs ArUco or AprilTag detection, executes path planning and landing.
@@ -183,7 +183,6 @@ def main():
     )
     p_mission.start()
     logger.info("[MAIN] mission started")
-    time.sleep(2)
 
     # 7. Process 5: Telemetry — reads UAV state from shared memory,
     #    logs all flight data to a SQLite database for post-flight analysis.
