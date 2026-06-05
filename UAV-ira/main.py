@@ -28,8 +28,8 @@ from core.log import get_logger
 from vio_slam.broadcaster import broadcaster
 from vio_slam.vio import run_vio_process
 from vio_slam.slam import run_slam_process
-from telemetry.telemetry_logger import log_event
 # mission module is selected at runtime based on --planner flag
+# telemetry is merged into mission via log_event() in telemetry/telemetry_csv.py
 
 logger = get_logger(__name__)
 
@@ -80,14 +80,14 @@ def main():
 
     # One mutex per shared memory block — each process acquires the lock
     # before reading or writing so frames are never half-written
-    rgb_frame_mutex = vio_dict["rgb_frame_mutex"]
-    gray_frame_mutex = vio_dict["gray_frame_mutex"]
-    depth_frame_mutex = vio_dict["depth_frame_mutex"]
-    attitude_mutex = vio_dict["attitude_mutex"]
-    position_mutex = vio_dict["position_mutex"]
+    rgb_frame_mutex          = vio_dict["rgb_frame_mutex"]
+    gray_frame_mutex         = vio_dict["gray_frame_mutex"]
+    depth_frame_mutex        = vio_dict["depth_frame_mutex"]
+    attitude_mutex           = vio_dict["attitude_mutex"]
+    position_mutex           = vio_dict["position_mutex"]
     local_position_ned_mutex = vio_dict["local_position_ned_mutex"]
-    slam_trigger_mutex = vio_dict["slam_trigger_mutex"]
-    slam_enabled_mutex = vio_dict["slam_enabled_mutex"]
+    slam_trigger_mutex       = vio_dict["slam_trigger_mutex"]
+    slam_enabled_mutex       = vio_dict["slam_enabled_mutex"]
 
     # Shared between mission (writes on uncertain detection) and
     # mission SA planner (reads to reorder remaining waypoints)
@@ -99,7 +99,6 @@ def main():
 
     Path("flight_logs").mkdir(exist_ok=True)
     log_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    db_path = f"flight_logs/flight_{log_timestamp}.db"
 
     logger.info("[MAIN] Shared memory ready — spawning processes")
 
@@ -118,7 +117,7 @@ def main():
         name="broadcaster"
     )
     p_broadcaster.start()
-    logger.info("[MAIN] broadcaster started — waiting 3s for camera boot")
+    logger.info("[MAIN] broadcaster started — waiting 5s for camera boot")
     time.sleep(5)   # camera needs ~3s to initialise before VIO reads frames
 
     # 4. Process 2: VIO — reads gray and depth from shared memory, computes
@@ -142,8 +141,8 @@ def main():
         name="vio"
     )
     p_vio.start()
-    logger.info("[MAIN] vio started — waiting 1s for calibration read")
-    time.sleep(1)   # VIO reads calibration from shared memory at startup
+    logger.info("[MAIN] vio started — waiting 3s for calibration read")
+    time.sleep(3)   # VIO reads calibration from shared memory at startup
 
     # 5. Process 3: SLAM — reads RGB from shared memory, finds loop closures,
     #    writes drift corrections for VIO to apply on the next frame.
@@ -161,11 +160,12 @@ def main():
     )
     p_slam.start()
     logger.info("[MAIN] slam started")
-    time.sleep(0.5)
+    time.sleep(1)
 
     # 6. Process 4: Mission — reads RGB and position from shared memory,
     #    runs ArUco or AprilTag detection, executes path planning and landing.
     #    Sole UART0 owner for arm → sweep → land.
+    #    Telemetry is merged here — log_event() writes to CSV from mission process.
     p_mission = mp.Process(
         target=run_mission,
         args=(
@@ -183,26 +183,12 @@ def main():
     )
     p_mission.start()
     logger.info("[MAIN] mission started")
+    logger.info(f"[MAIN] Flight log → flight_logs/flight_{log_timestamp}.csv")
 
-    # 7. Process 5: Telemetry — reads UAV state from shared memory,
-    #    logs all flight data to a SQLite database for post-flight analysis.
-    p_telemetry = mp.Process(
-        target=telemetry_logger,
-        args=(
-            lock,
-            db_path,
-            cfg.pixhawk.connection_string,
-            cfg.pixhawk.baud_rate,
-        ),
-        name="telemetry"
-    )
-    p_telemetry.start()
-    logger.info(f"[MAIN] telemetry started — logging to {db_path}")
+    processes = [p_broadcaster, p_vio, p_slam, p_mission]
+    logger.info("[MAIN] All 4 processes running")
 
-    processes = [p_broadcaster, p_vio, p_slam, p_mission, p_telemetry]
-    logger.info("[MAIN] All 5 processes running")
-
-    # 8. Monitoring loop — prints status every second until mission exits.
+    # 7. Monitoring loop — prints status every second until mission exits.
     #    Mission exiting is the signal to shut everything else down.
     try:
         while True:
@@ -212,16 +198,11 @@ def main():
 
             vio_str    = (f"{vio_x:.2f},{vio_y:.2f},{vio_z:.2f}" if vio_ts > 0 else "None")
             marker_str = f"ID:{marker_id}" if marker_id else "None"
-            sa_str     = (
-                f"SA-replan fired at N={uncertain_pos[0]:.2f} E={uncertain_pos[1]:.2f}"
-                if uncertain_pos[2] == 1.0 else "SA-replan pending"
-            )
 
             logger.info(
                 f"[STATUS] mode={mode.name} | "
                 f"vio={vio_str} | "
-                f"marker={marker_str} | "
-                f"{sa_str}"
+                f"marker={marker_str}"
             )
 
             if not p_mission.is_alive():
@@ -247,7 +228,7 @@ def main():
         state.close()
         cleanup_shared_state(state_dict)
         cleanup_vio_pipeline_state(vio_dict)
-        logger.info(f"[MAIN] Shutdown complete. Telemetry saved to {db_path}")
+        logger.info("[MAIN] Shutdown complete")
         logger.info("[MAIN] Done. Yabadabadoo!")
 
 
