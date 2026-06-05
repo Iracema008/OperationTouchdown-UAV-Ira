@@ -28,7 +28,7 @@ from core.log import get_logger
 from vio_slam.broadcaster import broadcaster
 from vio_slam.vio import run_vio_process
 from vio_slam.slam import run_slam_process
-from telemetry.telemetry_logger import telemetry_logger
+from telemetry.telemetry_logger import log_event
 # mission module is selected at runtime based on --planner flag
 
 logger = get_logger(__name__)
