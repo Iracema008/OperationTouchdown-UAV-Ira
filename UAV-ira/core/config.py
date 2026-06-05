@@ -49,8 +49,8 @@ class DetectorConfig:
 
 @dataclass
 class ArucoConfig:
-    target_marker_id: List[int] = field(default_factory=lambda: [3, 7])
-    marker_size_m: float = 0.305
+    target_marker_id: List[int] = field(default_factory=lambda: [0, 2])
+    marker_size_m: float = 0.254
     dictionary: str = "DICT_6X6_250"
     detection_fps: int = 30
     min_consecutive_detections: int = 3
