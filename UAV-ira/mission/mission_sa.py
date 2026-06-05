@@ -169,6 +169,8 @@ def run_mission(lock, marker_confirmed, ugv_signal, hover_reached, cfg, log_time
     controller.arm_motors()
     controller.takeoff_to_altitude(cfg.pixhawk.hover_altitude_m)
     state.set_flight_mode(FlightMode.SCAN)
+    takeoff_start = time.time()
+    logger.info("[SA] Airborne — starting mission loop")
     logger.info("[SA] Airborne — starting mission loop")
 
     # check if we are in simulated mode, check for connection string udp in core/config
@@ -270,6 +272,10 @@ def run_mission(lock, marker_confirmed, ugv_signal, hover_reached, cfg, log_time
                         )
 
                         if count >= CONFIRM_THRESHOLD:
+                            total_flight_time = time.time() - takeoff_start
+                            if total_flight_time < 5.0:
+                                logger.info(f"[SA] Min flight time not met ({total_flight_time:.1f}s / 5.0s) — continuing")
+                                continue
                             cx = (corners[0][0][0][0] +
                                   (corners[0][0][2][0] - corners[0][0][0][0]) / 2)
                             cy = (corners[0][0][0][1] +
@@ -327,7 +333,7 @@ def run_mission(lock, marker_confirmed, ugv_signal, hover_reached, cfg, log_time
                 else:
                     logger.info("[SA] Sweep complete — marker not found")
                     phase = "done"
-
+            # this approach just flies to the current position at a lower altitude and waits for landing
             elif phase == "approach":
                 confirm_down = -FIELD_CONFIG["confirm_alt_m"]
                 send_goto_ned(
@@ -346,7 +352,7 @@ def run_mission(lock, marker_confirmed, ugv_signal, hover_reached, cfg, log_time
                 elif time.time() - approach_start > FIELD_CONFIG["approach_timeout_s"]:
                     logger.warning("[SA] Approach timeout — landing anyway")
                     phase = "land"
-
+            # landing happens when confirmed marker is reached at confirm altitude, or approach timeout
             elif phase == "land":
                 logger.info("[SA] Stationary landing")
                 # Uncomment for AprilTag precision landing:
