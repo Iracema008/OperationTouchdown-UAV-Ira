@@ -336,9 +336,17 @@ if __name__ == "__main__":
 
     log_event(CSV_PATH, "TAKEOFF_COMPLETE", {"alt_m": TAKEOFF_ALTITUDE})
 
-    # 7. Build VO — swap for your actual VO class and instantiation
-    from vision.vio import VisualOdometry
-    vo = VisualOdometry()
+    # 7. Build VO — reads calibration from shared memory same as run_vio_process
+    from multiprocessing import shared_memory
+    from vio_slam.vio import VO_LK
+    import numpy as np
+
+    shm_calib  = shared_memory.SharedMemory(name="oak_calib")
+    local_calib = np.ndarray((3, 3), dtype=np.float64, buffer=shm_calib.buf).copy()
+    shm_calib.close()
+
+    vo = VO_LK(K=local_calib)
+    logger.info("[Lawnmower] VO_LK initialised")
 
     stop_event = threading.Event()
 
