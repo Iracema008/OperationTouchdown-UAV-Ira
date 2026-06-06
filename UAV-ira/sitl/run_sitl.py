@@ -1,4 +1,4 @@
-""" Software In The Loop (SITL) runner for lawnmower search & landing."""
+''' Software In The Loop (SITL) runner for lawnmower search & landing. '''
 
 import time
 import threading
@@ -8,38 +8,41 @@ from multiprocessing import Array
 from datetime import datetime
 from pathlib import Path
 
-
 from core.state import (
     create_shared_state,
     cleanup_shared_state,
     UAVStateAccessor,
 )
-
 from core.config import load_config
 from core.log import get_logger
-#from mission.mission import run_mission
 
 logger = get_logger(__name__)
 
 
-# running with grid is lawnmower, simulated annealing is sa
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--planner", choices=["grid", "sa"], default="grid")
+    # sa  → mission/mission_sa.py  (plain distance SA)
+    # sac → mission/mission_sa_center.py  (center-biased SA)
+    # grid → mission/mission_grid.py  (boustrophedon)
+    parser.add_argument(
+        "--planner", choices=["grid", "sa", "sac"], default="grid"
+    )
     args = parser.parse_args()
 
-    # Dynamic import — same pattern as main.py
+    # 1. Dynamic import — same pattern as main.py
     if args.planner == "sa":
         from mission.mission_sa import run_mission
-        logger.info("[SITL] Planner = SA")
+        logger.info("[SITL] Planner = SA (plain distance)")
+    elif args.planner == "sac":
+        from mission.mission_sa_center import run_mission
+        logger.info("[SITL] Planner = SAC (center-biased)")
     else:
         from mission.mission_grid import run_mission
-        logger.info("[SITL] Planner = GRID")
+        logger.info("[SITL] Planner = GRID (boustrophedon)")
 
     cfg = load_config(mode="scan")
 
-    # UAV state shared memory only
-    # no VIO pipeline blocks needed for sitl
+    # 2. UAV state shared memory only — no VIO pipeline blocks needed for SITL
     state_dict       = create_shared_state()
     lock             = state_dict["lock"]
     marker_confirmed = state_dict["marker_confirmed"]
@@ -48,7 +51,7 @@ def main():
 
     uncertain_pos   = Array('d', [0.0, 0.0, 0.0])
 
-    # no actual camera is needed for sitl, so we keep a fake mutex
+    # No OAK-D in SITL — fake mutex so mission process doesn't crash on import
     rgb_frame_mutex = mp.Lock()
 
     Path("flight_logs").mkdir(exist_ok=True)
@@ -56,8 +59,11 @@ def main():
 
     state = UAVStateAccessor(lock, marker_confirmed, ugv_signal, hover_reached)
 
-
-    # Press Enter to simulate marker found at any point during searcg
+    # 3. Keyboard trigger thread — Press Enter at any point to simulate
+    #    ArUco marker confirmed. Drone will stop sweeping and transition
+    #    to approach → land at its current position.
+    #    In SA/SAC missions this also triggers the destination_discovered
+    #    log event and approach phase exactly as it would on real hardware.
     def wait_for_keypress():
         input("\n>>> Press Enter to simulate marker_confirmed <<<\n")
         if not marker_confirmed.is_set():
@@ -69,7 +75,9 @@ def main():
 
     threading.Thread(target=wait_for_keypress, daemon=True).start()
 
-    # single SITL connection, local pos ned from SITL inside its own loop
+    # 4. Single SITL mission process — reads LOCAL_POSITION_NED from SITL
+    #    directly on UART0 (udp:0.0.0.0:14550 in config).
+    #    All other processes (broadcaster, vio, slam) are skipped.
     p_mission = mp.Process(
         target=run_mission,
         args=(
@@ -82,6 +90,7 @@ def main():
     p_mission.start()
     logger.info("[SITL] Mission process started")
 
+    # 5. Monitoring loop — prints position and confirmed status every second
     try:
         while True:
             (x, y, z, _), ts = state.get_vio_position()
