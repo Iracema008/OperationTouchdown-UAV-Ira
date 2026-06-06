@@ -38,7 +38,7 @@ def main():
     parser = argparse.ArgumentParser(description="UAV autonomous mission")
     parser.add_argument("--mode", choices=["scan", "land"], default="scan")
     parser.add_argument(
-        "--planner", choices=["grid", "sa", "c1", "c2"], default="grid",
+        "--planner", choices=["grid", "sa", "sac", "c1", "c2"], default="grid",
         help="grid = boustrophedon | sa = simulated annealing | c1 = challenge 1 | c2 = challenge 2"
     )
     args = parser.parse_args()
@@ -50,6 +50,9 @@ def main():
     if args.planner == "sa":
         from mission.mission_sa import run_mission
         logger.info("[MAIN] Planner = SA (simulated annealing)")
+    elif args.planner == "sac":
+        from mission.mission_sa_center import run_mission
+        logger.info("[MAIN] Planner = SAC (center-biased simulated annealing)")
     elif args.planner == "c1":
         from mission.challenge_one import run_mission
         logger.info("[MAIN] Planner = C1 (challenge 1 — UGV landing)")
