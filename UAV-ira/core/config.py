@@ -79,6 +79,7 @@ class PixhawkConfig:
 @dataclass
 class UARTConfig:
     #connect uart2 ports from broadcaster
+    # for the simulation this port 
     broadcaster_port: str = "/dev/ttyAMA2"
     #uart3 for vio
     vio_port: str = "/dev/ttyAMA3"
@@ -108,9 +109,9 @@ class Config:
     aruco:    ArucoConfig    = field(default_factory=ArucoConfig)
     april:    AprilTagConfig = field(default_factory=AprilTagConfig)
     pixhawk:  PixhawkConfig  = field(default_factory=PixhawkConfig)
-    uart:     UARTConfig     = field(default_factory=UARTConfig)
-    comms:    CommsConfig    = field(default_factory=CommsConfig)
-    slam:     SLAMConfig     = field(default_factory=SLAMConfig)
+    uart:     UARTConfig = field(default_factory=UARTConfig)
+    comms:    CommsConfig = field(default_factory=CommsConfig)
+    slam:     SLAMConfig = field(default_factory=SLAMConfig)
 
 
 def load_config(mode: Optional[str] = None) -> Config:
