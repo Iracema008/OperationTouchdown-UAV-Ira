@@ -22,19 +22,19 @@ logger = get_logger(__name__)
 
 CONNECTION_STRING = "/dev/serial0"
 BAUDRATE          = 57600
-PLAN_PATH         = "/home/pi/mission/30yard.plan"
+PLAN_PATH         = "/home/pi/mission/zone4.plan"
 CSV_PATH          = "/home/pi/logs/lawnmower_test.csv"
 FIELD_CONFIG = {
     "north_min_m":        0.0,
-    "north_max_m":        15.0,
+    "north_max_m":        8.0,
     "east_min_m":         0.0,
-    "east_max_m":         15.0,
+    "east_max_m":         8.0,
     "search_alt_m":       3.0,
     "confirm_alt_m":      1.2,
     "wp_accept_radius_m": 0.4,   # unused in fire-and-forget mode, kept for reference
     "wp_timeout_s":       20.0,  # fallback dwell for approach leg
-    "move_speed_ms":      1.2,
-    "approach_speed_ms":  0.5,   # slower speed used during marker descent
+    "move_speed_ms":      0.3,
+    "approach_speed_ms":  0.2,   # slower speed used during marker descent
     "wp_dwell_s":         2.0,   # how long to broadcast each sweep waypoint
 }
 
