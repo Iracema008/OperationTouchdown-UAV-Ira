@@ -2,6 +2,7 @@
 
 # planner="grid"  → plain  order, no optimzation, no replan
 # planner="sa"    → Simulated annealing optimized order (pre-flight) &  mid-flight replan
+# this is the old confirm position version 
 
 import math
 import time
@@ -19,21 +20,21 @@ logger = get_logger(__name__)
 
 FIELD_CONFIG = {
     "north_min_m": 0.0,
-    "north_max_m": 8.0,
+    "north_max_m": 9.2,
     "east_min_m": 0.0,
-    "east_max_m": 8.0,
+    "east_max_m": 9.2,
     "search_alt_m": 3.0,
     "confirm_alt_m": 1.2,
     "wp_accept_radius_m": 0.4,
     "wp_timeout_s": 20.0,
-    "move_speed_ms": 1.2,
+    "move_speed_ms": 1.2, # maybe 3? 
 }
 
 LAWNMOWER_CONFIG = {
     # Derived from OAK-D S2 real intrinsics at 640x480, 3m altitude, 10% overlap
     # TODO: need to switch this to 640 by 400 .
     "col_spacing_m": 2.8,
-    "row_spacing_m": 2.0,
+    "row_spacing_m": 2.5,
 }
 
 

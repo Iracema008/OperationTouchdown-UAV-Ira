@@ -1,15 +1,7 @@
 ''' Simulated Annealing Search Pattern '''
 
 """
-
-    --planner grid  → plain boustrophedon order, no SA (lawnmower.py)
-    --planner sa    → SA-optimised order + mid-flight replan (this file)
-
-Waypoint format (shared contract with lawnmower.py):
-    list of (north, east) float tuples
-
-TWO ENTRY POINTS
-----------------
+enters from: 
 build_sa_waypoints(grid_waypoints, start_pos)
     Pre-flight — reorders the full grid to minimise total path distance.
 
@@ -68,8 +60,8 @@ def run_sa(waypoints: list, start_pos: tuple, sa_cfg: dict = None) -> list:
     if len(waypoints) <= 2:
         return waypoints  # nothing meaningful to optimise
 
-    cfg      = sa_cfg or SA_CONFIG
-    temp     = cfg["initial_temp"]
+    cfg = sa_cfg or SA_CONFIG
+    temp = cfg["initial_temp"]
     cool     = cfg["cooling_rate"]
     min_temp = cfg["min_temp"]
     iters    = cfg["iterations_per_temp"]
