@@ -20,7 +20,7 @@ from telemetry.telemetry_logger import log_event
 
 logger = get_logger(__name__)
 
-PLAN_PATH = "home/orangepi/OperationTouchdown/UAV-ira/landing/geofence/csufField.plan"
+PLAN_PATH = "/home/orangepi/OperationTouchdown/UAV-ira/landing/geofence/csufField.plan"
 
 
 FIELD_CONFIG = {
