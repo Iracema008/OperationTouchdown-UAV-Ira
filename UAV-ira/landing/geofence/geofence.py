@@ -10,7 +10,7 @@ no home GPS lock. You can change FENCE_ACTION to 1 (Land) if preferred.
 
 Usage:
     from landing.geofence.geofence import upload_geofence_from_plan
-    upload_geofence_from_plan(master, "/path/to/30yard.plan")
+    upload_geofence_from_plan(master, "/path/to/csufField.plan")
 """
 
 import json
