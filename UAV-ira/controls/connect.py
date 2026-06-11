@@ -4,7 +4,7 @@
 from pymavlink import mavutil
 
 def connect_UART0():
-    serial_port = '/dev/ttyAMA0'
+    serial_port = '/dev/ttyS3'
     baudrate =  57600
     source_system = 1 # System/vehicle sending messages is system1(drone/vehicle #1)
     source_component = 191 # Component sending messages is onboard Computer
@@ -20,7 +20,7 @@ def connect_UART0():
     return master
 
 def connect_UART2():
-    serial_port = '/dev/ttyAMA2'
+    serial_port = '/dev/ttyS4'
     baudrate =  57600
     source_system = 1 # System/vehicle sending messages is system1(drone/vehicle #1)
     source_component = 191 # Component sending messages is onboard Computer
@@ -36,7 +36,7 @@ def connect_UART2():
     return master
 
 def connect_UART3():
-    serial_port = '/dev/ttyAMA3'
+    serial_port = '/dev/ttyS7'
     baudrate =  57600
     source_system = 1 # System/vehicle sending messages is system1(drone/vehicle #1)
     source_component = 191 # Component sending messages is onboard Computer
