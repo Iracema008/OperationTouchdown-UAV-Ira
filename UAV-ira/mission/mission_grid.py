@@ -29,7 +29,7 @@ FIELD_CONFIG = {
     "east_min_m": 0.0,
     "east_max_m": 5.0,
     "search_alt_m": 3.0,
-    "confirm_alt_m": 0.3,
+    "confirm_alt_m": 0.8,
     "wp_accept_radius_m": 0.4, # meters from waypoint to consider it reached
     "wp_dwell_s": 3.0,  # seconds at each waypoint before continuing
     "approach_timeout_s": 15.0,
