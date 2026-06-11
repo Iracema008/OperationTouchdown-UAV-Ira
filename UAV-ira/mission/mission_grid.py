@@ -41,7 +41,7 @@ BOUNDS_CHECK = {
     "north_min_m": -5.0,
     "north_max_m":  5.0,
     "east_min_m":  -5.0,
-    "east_max_m":   5.0,
+    "east_max_m":   6.5,
 }
 
 LAWNMOWER_CONFIG = {
