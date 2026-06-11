@@ -68,7 +68,8 @@ class AprilTagConfig:
 class PixhawkConfig:
     # comment out udp for sitl, keep serial0 for flight
     #connection_string: str =  "udp:0.0.0.0:14550"
-    connection_string: str = "/dev/serial0"
+    connection_string: str = "/dev/ttyS3"
+    # old version before orange piconnection_string: str = "/dev/serial0"
     baud_rate: int = 57600
     hover_altitude_m: float = 3.0
     land_speed_ms: float = 0.3
@@ -80,9 +81,9 @@ class PixhawkConfig:
 class UARTConfig:
     #connect uart2 ports from broadcaster
     # for the simulation this port 
-    broadcaster_port: str = "/dev/ttyAMA2"
+    bbroadcaster_port: str = "/dev/ttyS4"
     #uart3 for vio
-    vio_port: str = "/dev/ttyAMA3"
+    vio_port: str = "/dev/ttyS7"
     baud_rate: int = 57600
 
 
