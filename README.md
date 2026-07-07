@@ -164,7 +164,7 @@ requirements.txt
 
 ## Process Architecture
 
-Five processes run in parallel during a real flight. Each owns exactly one hardware resource.
+We have since switched to an Orange Pi (because it has more cores); this explanation is for a Raspberry Pi. Before, it was just four processes running in parallel during a real flight. The idea is relatively the same. Each owns exactly one hardware resource. 
 
 | Process | File | UART | Purpose |
 |---|---|---|---|
