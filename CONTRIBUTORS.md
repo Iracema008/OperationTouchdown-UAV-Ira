@@ -1,6 +1,6 @@
 # Contributors
 
-This repository contains my (@Iracema008) contributions extracted from CSUF's Operation Touchdown team 2025-2026. This is  NOT a solo project — the base architecture and the work
+This repository contains my contributions from CSUF's Operation Touchdown team for 2025-2026 (UAV-ira branch). This is  NOT a solo project — the base architecture and the work
 described here was built collaboratively.
 
 **Original team repository:** [OperationTouchdown](https://github.com/CSUF-RAYTHEON/OperationTouchdown/branches)
